@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
-    <color name="fuji_green">#1B5E20</color>
-    <color name="fuji_green_light">#4C8C4A</color>
-    <color name="ic_launcher_background">#101418</color>
-    <color name="surface_dark">#15191E</color>
+    <!-- The Deco "light in fog" palette, shared with Worldly and the Deco launcher -->
+    <color name="night">#FF05070B</color>
+    <color name="surface">#FF0D1422</color>
+    <color name="surface_hi">#FF131C2C</color>
+    <color name="text">#FFEEF4F8</color>
+    <color name="muted">#FF8FA0B3</color>
+    <color name="amber">#FFEB9438</color>
+    <color name="amber_light">#FFF0AE6A</color>
+    <color name="ic_launcher_background">#FF05070B</color>
 </resources>

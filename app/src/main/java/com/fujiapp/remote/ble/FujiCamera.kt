@@ -1,6 +1,6 @@
 package com.fujiapp.remote.ble
 
-import com.fujiapp.remote.model.CameraInfo
+import com.fujiapp.remote.model.CameraSnapshot
 import com.fujiapp.remote.model.CameraVitals
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -21,14 +21,27 @@ data class Capabilities(val backup: Boolean, val restore: Boolean, val vitals: B
 /** The camera-level operations, on top of one [GattClient] connection. */
 class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit) {
 
+
     /**
-     * Register this phone with the camera, as XApp does on every connection (GeoShutter's tested
-     * X100VI sequence): read the status, acknowledge it, write the client name, then subscribe.
+     * Register this phone with the camera (GeoShutter's tested X100VI sequence): read the status,
+     * write this phone's identification number back, write the client name, then subscribe.
+     *
+     * The identification number: on the pairing connection it is the value the camera offers with
+     * byte 3 set to 0x20 (XApp's marker). On later connections XApp writes the number it stored
+     * then, whatever the camera reads back. In two field logs the camera offered a changing value
+     * (`9a 8d 06`, `9c 8d 06`, …) and dropped the link when that was echoed, while writing the
+     * stored `65 48 26 20` worked; so [storedId] is written when there is one, unless this
+     * connection just paired. Returns the number written, for the caller to store.
      *
      * Must run on a bonded link, right after pairing for a new camera: the X100VI refuses a
      * registration that comes minutes after the bond was made.
      */
-    suspend fun register(onWaitingForPairing: () -> Unit) {
+    suspend fun register(
+        storedId: Long?,
+        freshPairing: Boolean,
+        locationRequests: Boolean,
+        onWaitingForPairing: () -> Unit,
+    ): Long {
         if (!gatt.has(FujiGatt.DEVICE_IDENTIFICATION_NUMBER)) {
             if (gatt.hasService(FujiGatt.SVC_LEGACY_PAIRING)) {
                 throw UnsupportedCameraException(
@@ -39,9 +52,20 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
         }
         val status = readThroughPairing(FujiGatt.DEVICE_IDENTIFICATION_NUMBER, onWaitingForPairing)
         if (status.size != 4) throw GattException("Unexpected status from the camera: ${FujiProtocol.hex(status)}")
-        gatt.write(FujiGatt.DEVICE_IDENTIFICATION_NUMBER, FujiProtocol.ackStatus(status))
+        val ack = if (storedId != null && !freshPairing) {
+            log("writing the stored identification number")
+            FujiProtocol.le32(storedId)
+        } else {
+            log(if (freshPairing) "new pairing: acknowledging the camera's number" else "no stored number yet: acknowledging the camera's")
+            FujiProtocol.ackStatus(status)
+        }
+        gatt.write(FujiGatt.DEVICE_IDENTIFICATION_NUMBER, ack)
         gatt.write(FujiGatt.CONNECTED_DEVICE_NAME, FujiProtocol.clientName())
-        for (c in FujiGatt.REGISTRATION_SUBSCRIPTIONS) {
+
+        val subscriptions = FujiGatt.REGISTRATION_SUBSCRIPTIONS +
+            (if (locationRequests) listOf(FujiGatt.LOCATION_SYNC_STATE) else emptyList()) +
+            FujiGatt.LIVE_SUBSCRIPTIONS
+        for (c in subscriptions) {
             if (!gatt.has(c)) {
                 log("no ${c.name} on this camera, skipped")
                 continue
@@ -54,6 +78,13 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
             }
         }
         log("registered")
+        return FujiProtocol.idValue(ack)
+    }
+
+    /** Start or stop receiving the camera's location requests (location sync turned on or off). */
+    suspend fun setLocationRequests(on: Boolean) {
+        if (!gatt.has(FujiGatt.LOCATION_SYNC_STATE)) return
+        if (on) gatt.subscribe(FujiGatt.LOCATION_SYNC_STATE) else gatt.unsubscribe(FujiGatt.LOCATION_SYNC_STATE)
     }
 
     /**
@@ -74,35 +105,53 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
         }
     }
 
-    /** Read everything the camera reports about itself. Missing characteristics are left null. */
-    suspend fun readInfo(): CameraInfo {
-        suspend fun bytes(c: GattChar): ByteArray? =
-            if (!gatt.has(c)) null else try {
-                gatt.read(c)
+    /** Read every value that describes the camera. Missing or unreadable ones are left out. */
+    suspend fun readSnapshot(): CameraSnapshot {
+        val values = HashMap<java.util.UUID, ByteArray>()
+        for (c in FujiGatt.READABLE) {
+            if (!gatt.has(c)) continue
+            try {
+                values[c.uuid] = gatt.read(c)
             } catch (e: GattException) {
                 if (gatt.disconnected.value) throw e
-                null
             }
-        suspend fun text(c: GattChar): String? = FujiProtocol.string(bytes(c))
-
-        return CameraInfo(
-            model = text(FujiGatt.DEVICE_NAME),
-            cameraName = text(FujiGatt.CAMERA_NAME),
-            manufacturer = text(FujiGatt.MANUFACTURER),
-            modelNumber = text(FujiGatt.MODEL_NUMBER),
-            serialNumber = text(FujiGatt.SERIAL_NUMBER) ?: text(FujiGatt.CAMERA_SERIAL_NUMBER),
-            firmware = text(FujiGatt.FIRMWARE_REVISION),
-            hardwareRevision = text(FujiGatt.HARDWARE_REVISION),
-            softwareRevision = text(FujiGatt.SOFTWARE_REVISION),
-            bleProtocolVersion = FujiProtocol.u16(bytes(FujiGatt.BLE_PROTOCOL_VERSION)),
-            macAddress = text(FujiGatt.CAMERA_MAC_ADDRESS),
-            lensName = text(FujiGatt.LENS_PRODUCT_NAME),
-            lensFirmware = text(FujiGatt.LENS_FIRMWARE_VERSION),
-            power = FujiProtocol.powerState(bytes(FujiGatt.POWER_KEY_STATE)),
-            connectWhilePowerOff = FujiProtocol.u16(bytes(FujiGatt.REMOTE_BOOT_SETTING))?.let { it != 0 },
-            pairedPhones = FujiProtocol.u8(bytes(FujiGatt.PAIRING_SMART_DEVICE_NUM)),
-        )
+        }
+        return CameraSnapshot(values)
     }
+
+    /** Read one value again (after writing a setting). */
+    suspend fun read(c: GattChar): ByteArray? = if (gatt.has(c)) gatt.read(c) else null
+
+    // ---- camera settings, time, location and shutter ----
+
+    /** The camera's SMARTPHONE LOCATION SYNC. setting (GeoShutter saw the X100VI switch it). */
+    suspend fun setLocationSyncSetting(on: Boolean) =
+        gatt.write(FujiGatt.LOCATION_SYNC_SETTING, FujiProtocol.le16(if (on) 1 else 0))
+
+    /** Seconds between the camera's location requests, one of [FujiGatt.LOCATION_SYNC_INTERVALS]. */
+    suspend fun setLocationSyncInterval(seconds: Int) {
+        require(seconds in FujiGatt.LOCATION_SYNC_INTERVALS) { "unsupported interval $seconds" }
+        gatt.write(FujiGatt.LOCATION_SYNC_CYCLE, FujiProtocol.le16(seconds))
+    }
+
+    /** The camera's CONNECT WHILE POWER OFF setting. */
+    suspend fun setConnectWhilePowerOff(on: Boolean) =
+        gatt.write(FujiGatt.REMOTE_BOOT_SETTING, FujiProtocol.le16(if (on) 1 else 0))
+
+    /** Answer the camera's time request with the phone's clock and time zone. */
+    suspend fun sendTime(now: java.time.Instant, zone: java.time.ZoneId) {
+        if (gatt.has(FujiGatt.UTC_AND_TIMEZONE)) gatt.write(FujiGatt.UTC_AND_TIMEZONE, FujiProtocol.timePacket(now, zone))
+    }
+
+    /** Answer the camera's location request. */
+    suspend fun sendLocation(packet: ByteArray) {
+        if (gatt.has(FujiGatt.LOCATION_AND_SPEED)) gatt.write(FujiGatt.LOCATION_AND_SPEED, packet)
+    }
+
+    val hasShutter: Boolean get() = gatt.has(FujiGatt.SHOOTING_REQUEST)
+
+    /** The Bluetooth shutter button: [SHUTTER_HALF] (focus), [SHUTTER_FULL] or [SHUTTER_RELEASE]. */
+    suspend fun shutter(state: Int) = gatt.write(FujiGatt.SHOOTING_REQUEST, FujiProtocol.le16(state))
 
     val capabilities: Capabilities
         get() {
@@ -309,8 +358,12 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
         }
     }
 
-    private companion object {
-        val FILE_CORE = listOf(
+    companion object {
+        const val SHUTTER_RELEASE = 0
+        const val SHUTTER_HALF = 1
+        const val SHUTTER_FULL = 2
+
+        private val FILE_CORE = listOf(
             FujiGatt.FILE_TRANSACTION_STATE, FujiGatt.FILE_PARTIAL_SIZE, FujiGatt.FILE_TRANSFER_INDEX,
             FujiGatt.FILE_PARTIAL_DATA, FujiGatt.FILE_TRANSFER_RESULT,
         )

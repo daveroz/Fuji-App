@@ -42,8 +42,8 @@ data class FujiAdvert(
 enum class PowerState(val label: String) {
     ON("On"),
     OFF("Off"),
-    ASLEEP_STANDBY("Asleep (Bluetooth standby)"),
-    OFF_STANDBY("Off (Bluetooth standby)"),
+    ASLEEP_STANDBY("Asleep · Bluetooth standby"),
+    OFF_STANDBY("Off · Bluetooth standby"),
 }
 
 /** Byte-level helpers for the Fujifilm BLE messages. Pure Kotlin so it is unit-tested on the JVM. */
@@ -97,6 +97,96 @@ object FujiProtocol {
         for (i in 0 until 4) v = v or ((value[offset + i].toLong() and 0xFF) shl (8 * i))
         return v
     }
+
+    // ---- time and location (layouts from GeoShutter's docs, applied by an X100VI) ----
+
+    /**
+     * The 12-byte UTC_AND_TIMEZONE packet: UTC year (u16), month, day, hour, minute, second, then
+     * the zone's standard offset in hundredths of an hour (i32, +5:30 = 550) and a daylight-saving
+     * flag. The camera applies it only when it asked for the time (DATE_SYNC_STATE = 1).
+     */
+    fun timePacket(instant: java.time.Instant, zone: java.time.ZoneId): ByteArray {
+        val utc = instant.atZone(java.time.ZoneOffset.UTC)
+        val rules = zone.rules
+        val standardSeconds = rules.getStandardOffset(instant).totalSeconds
+        val hundredths = Math.round(standardSeconds * 100.0 / 3600.0).toInt()
+        val dst = if (rules.isDaylightSavings(instant)) 1 else 0
+        return le16(utc.year) + byteArrayOf(
+            utc.monthValue.toByte(), utc.dayOfMonth.toByte(), utc.hour.toByte(), utc.minute.toByte(), utc.second.toByte(),
+        ) + le32(hundredths.toLong()) + byteArrayOf(dst.toByte())
+    }
+
+    /**
+     * The 23-byte LOCATION_AND_SPEED packet: latitude and longitude × 10⁷ (i32), altitude in whole
+     * metres (i32), speed in m/s × 100 (i32), then the fix time in UTC (u16 year, month, day, hour,
+     * minute, second).
+     */
+    fun geotagPacket(latitude: Double, longitude: Double, altitudeM: Double, speedMps: Double, utc: java.time.Instant): ByteArray {
+        val t = utc.atZone(java.time.ZoneOffset.UTC)
+        return le32(Math.round(latitude * 1e7)) + le32(Math.round(longitude * 1e7)) +
+            le32(Math.round(altitudeM)) + le32(Math.round(speedMps * 100)) +
+            le16(t.year) + byteArrayOf(
+                t.monthValue.toByte(), t.dayOfMonth.toByte(), t.hour.toByte(), t.minute.toByte(), t.second.toByte(),
+            )
+    }
+
+    /** The identification number as a uint32 (little-endian), for storing between connections. */
+    fun idValue(bytes: ByteArray): Long = u32(bytes) ?: 0L
+
+    // ---- state decoding (value names from XApp 2.7.6) ----
+
+    /** AP_STATE: the camera's Wi-Fi access point. XApp's values carry bit 15; it is masked off. */
+    fun apState(value: ByteArray?): String? = when (u16(value)?.and(0x7FFF)) {
+        0 -> "Off"
+        1 -> "On"
+        2 -> "Starting"
+        3 -> "On, for reserved transfer"
+        null -> null
+        else -> "Code ${u16(value)}"
+    }
+
+    /** TRANSFER_STATE: whether pictures are waiting to be sent to the phone. */
+    fun transferState(value: ByteArray?): String? = when (u16(value)?.and(0x7FFF)) {
+        0 -> "Nothing waiting"
+        1 -> "Pictures waiting"
+        null -> null
+        else -> "Code ${u16(value)}"
+    }
+
+    /** STATE_ERROR_DETAILS: why the camera can't serve a request right now (14 = nothing). */
+    fun stateErrorDetails(value: ByteArray?): String? = when (val v = u16(value)) {
+        null -> null
+        0 -> "Other"
+        1 -> "FTP in use"
+        2 -> "Busy (short operation)"
+        3 -> "Busy (long operation)"
+        4 -> "Finishing an operation"
+        5 -> "Initial setup"
+        6 -> "USB in use"
+        7 -> "Tethered shooting (auto)"
+        8 -> "Tethered shooting (fixed)"
+        9 -> "USB RAW conversion"
+        10 -> "USB webcam"
+        11 -> "Live remote"
+        12 -> "Pictures not transferred"
+        13 -> "Frame.io in use"
+        14 -> "None"
+        else -> "Code $v"
+    }
+
+    /** LOGGING_SETTING: one byte per activity-log item, in XApp's order. */
+    val LOGGING_ITEMS: List<String> = listOf(
+        "Model name", "Camera ID", "Power on/off", "Shooting", "Shooting location", "Shooting settings",
+        "Shooting result", "Lens name", "Lens ID", "Camera status", "Fn button use", "Image transfer", "Thumbnails",
+    )
+
+    /** The activity-log items the camera records, or null if the value isn't one byte per item. */
+    fun loggingItems(value: ByteArray?): List<String>? {
+        if (value == null || value.size < LOGGING_ITEMS.size || value.any { it.toInt() !in 0..1 }) return null
+        return LOGGING_ITEMS.filterIndexed { i, _ -> value[i].toInt() == 1 }
+    }
+
+    fun onOff(value: ByteArray?): String? = (u16(value) ?: u8(value))?.let { if (it != 0) "On" else "Off" }
 
     fun le16(v: Int): ByteArray = byteArrayOf((v and 0xFF).toByte(), ((v ushr 8) and 0xFF).toByte())
 

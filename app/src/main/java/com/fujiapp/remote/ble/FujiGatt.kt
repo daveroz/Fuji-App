@@ -57,12 +57,21 @@ object FujiGatt {
     val CAMERA_SERIAL_NUMBER = GattChar(SVC_CAMERA_INFORMATION, uuid("e8e40d50-a625-4f1d-96ed-8cec034f5690"), "Camera serial number")
     /** NUL-terminated ASCII, "AA:BB:CC:DD:EE:FF". */
     val CAMERA_MAC_ADDRESS = GattChar(SVC_CAMERA_INFORMATION, uuid("49a12959-dfaa-4eb2-89ce-62548ad948f3"), "Camera MAC address")
+    /** uint16. */
+    val WAKEUP_MODE = GattChar(SVC_CAMERA_INFORMATION, uuid("9c72c205-5740-4f17-9949-0d3fadf2f67a"), "Wake-up mode")
+    /** uint32. */
+    val STARTUP_VALUE = GattChar(SVC_CAMERA_INFORMATION, uuid("4bf16f6d-7264-4e76-b0d2-52cde16d2c7d"), "Startup value")
+    /** One byte. */
+    val MOVIE_BUTTON = GattChar(SVC_CAMERA_INFORMATION, uuid("cae8c738-4bb6-4605-98c1-58331c87f3b6"), "Movie button")
+    /** XApp: CAMERA_Y_NUMBER, a 30-byte string. */
+    val CAMERA_Y_NUMBER = GattChar(SVC_CAMERA_INFORMATION, uuid("27870478-94a9-4345-849b-efa3bf37887f"), "Y number")
 
     // ---- Lens information ----
 
     val SVC_LENS_INFORMATION: UUID = uuid("15ca59fe-620c-464d-a987-223fab660cde")
     val LENS_PRODUCT_NAME = GattChar(SVC_LENS_INFORMATION, uuid("68887a7a-10a7-4a4a-aadd-6f9db1abaa0e"), "Lens name")
     val LENS_FIRMWARE_VERSION = GattChar(SVC_LENS_INFORMATION, uuid("621a98d8-6314-4c3e-a683-eea1d6166606"), "Lens firmware")
+    val LENS_SERIAL_NUMBER = GattChar(SVC_LENS_INFORMATION, uuid("df287e0c-c23f-4f80-afdd-c2b570288cdb"), "Lens serial")
 
     // ---- Connected device information: secure pairing (XApp: CONNECTED_DEVICE_INFORMATION_RED) ----
 
@@ -83,6 +92,18 @@ object FujiGatt {
     val LOGGING_SETTING = GattChar(SVC_CAMERA_SETTING, uuid("75823784-fbb7-4b71-abae-cd9a34072e3c"), "Logging setting")
     /** Number of phones paired with the camera (first byte). */
     val PAIRING_SMART_DEVICE_NUM = GattChar(SVC_CAMERA_SETTING, uuid("8814441b-1d7b-4046-891d-d8f80864cc8e"), "Paired phones")
+    /** uint16 0/1: the camera's SMARTPHONE LOCATION SYNC. setting. Notifies. */
+    val LOCATION_SYNC_SETTING = GattChar(SVC_CAMERA_SETTING, uuid("aab609c4-94dd-4d89-bc60-665d5090b828"), "Location sync setting")
+    /** uint16 seconds between the camera's location requests. Notifies. */
+    val LOCATION_SYNC_CYCLE = GattChar(SVC_CAMERA_SETTING, uuid("c95d91ae-b247-4d6d-8661-7dd5d6a0f85b"), "Location sync interval")
+    /** uint16 0/1: reserve pictures for transfer after shooting. Notifies. */
+    val RESERVATION_AFTER_SHOOTING = GattChar(SVC_CAMERA_SETTING, uuid("bd45f887-a6be-4cb7-8565-390df38bf5bf"), "Transfer after shooting")
+    /** One byte 0/1. Notifies. */
+    val IMAGE_TRANSFER_SETTING = GattChar(SVC_CAMERA_SETTING, uuid("caedb497-83bf-482c-91ef-91cf6f1216ff"), "Image transfer setting")
+    /** Four bytes. Notifies. */
+    val IMAGE_TRANSFER_SETTING_EX = GattChar(SVC_CAMERA_SETTING, uuid("98934b2c-756c-4632-aa2f-dcba1bfec824"), "Image transfer setting ex")
+    /** One byte 0/1: send resized pictures. Notifies. */
+    val IMAGE_RESIZE_SETTING = GattChar(SVC_CAMERA_SETTING, uuid("82a9f452-c5ce-4ef5-8203-3fc9a47f8171"), "Image resize setting")
 
     // ---- Camera state (XApp: SERVICE_FF_CAMERA_STATE) ----
 
@@ -99,6 +120,11 @@ object FujiGatt {
     val LOG_TRANSFER_STATE = GattChar(SVC_CAMERA_STATE, uuid("2f6cb772-1d69-448e-8819-fe6b5c20b094"), "Log transfer state")
     /** uint16 notify: 1 = the camera's vital data changed. */
     val CAMERA_VITAL_STATE = GattChar(SVC_CAMERA_STATE, uuid("e6692c5c-b7cd-44f4-95fc-eda07ce32560"), "Camera vital state")
+    val FWUPDATE_STATE = GattChar(SVC_CAMERA_STATE, uuid("049ec406-ef75-4205-a390-08fe209c51f0"), "Firmware update state")
+    /** uint16. */
+    val CARD_STATE = GattChar(SVC_CAMERA_STATE, uuid("34d8c8de-e2a9-43ff-822c-7d945dd8d8e1"), "Card state")
+    /** uint16, see [FujiProtocol.stateErrorDetails]: why the camera can't do something right now. */
+    val STATE_ERROR_DETAILS = GattChar(SVC_CAMERA_STATE, uuid("1587b102-0b6d-4b63-9226-66fcc6d17387"), "State details")
 
     // ---- Camera control (furble: "shutter" service) ----
 
@@ -109,6 +135,18 @@ object FujiGatt {
     val RESTORE_REQUEST = GattChar(SVC_CAMERA_CONTROL, uuid("f1897eb9-a9aa-40f0-8ce6-2fa7915bc459"), "Restore request")
     /** uint16: 1 = activity logs, 2 = camera vital data (shutter count etc.). */
     val LOG_TRANSFER_REQUEST = GattChar(SVC_CAMERA_CONTROL, uuid("2674f0b0-f909-4e73-8656-338e9c74457f"), "Log transfer request")
+    /** uint16: 1 = half press (focus), 2 = full press, 0 = release (firmware parser, MaxRink/furble). */
+    val SHOOTING_REQUEST = GattChar(SVC_CAMERA_CONTROL, uuid("7fcf49c6-4ff0-4777-a03d-1a79166af7a8"), "Shutter")
+
+    // ---- Current time and location ----
+
+    val SVC_CURRENT_TIME: UUID = uuid("e872b11f-d526-4ae1-9bb4-89a99d48fa59")
+    /** 12 bytes, see [FujiProtocol.timePacket]. Applied only when the camera asked (DATE_SYNC_STATE). */
+    val UTC_AND_TIMEZONE = GattChar(SVC_CURRENT_TIME, uuid("c52edbce-1fe2-4ecc-9483-907e6592be9e"), "Date and time")
+
+    val SVC_CURRENT_LOCATION: UUID = uuid("3b46ec2b-48ba-41fd-b1b8-ed860b60d22b")
+    /** 23 bytes, see [FujiProtocol.geotagPacket]. */
+    val LOCATION_AND_SPEED = GattChar(SVC_CURRENT_LOCATION, uuid("0f36ec14-29e5-411a-a1b6-64ee8383f090"), "Location")
 
     // ---- Camera startup information (XApp: CAMERA_STARTUP_INFORMATION_RED) ----
 
@@ -140,14 +178,25 @@ object FujiGatt {
     val ADVERTISED_PAIRING: UUID = SVC_CAMERA_INFORMATION
     val ADVERTISED_BONDED: List<UUID> = listOf(SVC_STARTUP_INFORMATION, SVC_CONNECTED_DEVICE)
 
-    /** Every characteristic above, for log names. */
-    val ALL: List<GattChar> = listOf(
+    /**
+     * Everything readable that describes the camera, read for the status screen. Leaves out the
+     * Wi-Fi passphrase on purpose, and the pairing status (read during registration).
+     */
+    val READABLE: List<GattChar> = listOf(
         DEVICE_NAME, MANUFACTURER, MODEL_NUMBER, SERIAL_NUMBER, HARDWARE_REVISION, FIRMWARE_REVISION,
-        SOFTWARE_REVISION, BLE_PROTOCOL_VERSION, CAMERA_SERIAL_NUMBER, CAMERA_MAC_ADDRESS, LENS_PRODUCT_NAME,
-        LENS_FIRMWARE_VERSION, DEVICE_IDENTIFICATION_NUMBER, CONNECTED_DEVICE_NAME, CAMERA_NAME, LOGGING_SETTING,
-        PAIRING_SMART_DEVICE_NUM, AP_STATE, TRANSFER_STATE, DATE_SYNC_STATE, LOCATION_SYNC_STATE, BACKUP_STATE,
-        RESTORE_STATE, LOG_TRANSFER_STATE, CAMERA_VITAL_STATE, BACKUP_REQUEST, RESTORE_REQUEST, LOG_TRANSFER_REQUEST,
-        POWER_KEY_STATE, REMOTE_BOOT_SETTING, FILE_TRANSFER_INDEX, FILE_INFORMATION, FILE_PARTIAL_SIZE,
+        SOFTWARE_REVISION, BLE_PROTOCOL_VERSION, CAMERA_SERIAL_NUMBER, CAMERA_MAC_ADDRESS, WAKEUP_MODE, STARTUP_VALUE,
+        MOVIE_BUTTON, CAMERA_Y_NUMBER, LENS_PRODUCT_NAME, LENS_FIRMWARE_VERSION, LENS_SERIAL_NUMBER, CAMERA_NAME,
+        LOGGING_SETTING, PAIRING_SMART_DEVICE_NUM, LOCATION_SYNC_SETTING, LOCATION_SYNC_CYCLE,
+        RESERVATION_AFTER_SHOOTING, IMAGE_TRANSFER_SETTING, IMAGE_TRANSFER_SETTING_EX, IMAGE_RESIZE_SETTING,
+        AP_STATE, TRANSFER_STATE, CAMERA_VITAL_STATE, FWUPDATE_STATE, CARD_STATE, STATE_ERROR_DETAILS,
+        POWER_KEY_STATE, REMOTE_BOOT_SETTING,
+    )
+
+    /** Every characteristic above, for log names. */
+    val ALL: List<GattChar> = READABLE + listOf(
+        DEVICE_IDENTIFICATION_NUMBER, CONNECTED_DEVICE_NAME, DATE_SYNC_STATE, LOCATION_SYNC_STATE, BACKUP_STATE,
+        RESTORE_STATE, LOG_TRANSFER_STATE, BACKUP_REQUEST, RESTORE_REQUEST, LOG_TRANSFER_REQUEST, SHOOTING_REQUEST,
+        UTC_AND_TIMEZONE, LOCATION_AND_SPEED, FILE_TRANSFER_INDEX, FILE_INFORMATION, FILE_PARTIAL_SIZE,
         FILE_PARTIAL_DATA, FILE_TRANSFER_RESULT, FILE_TRANSACTION_STATE, FILE_NUMBER,
     )
 
@@ -163,13 +212,27 @@ object FujiGatt {
         SVC_CAMERA_CONTROL to "Camera control",
         SVC_STARTUP_INFORMATION to "Startup information",
         SVC_FILE to "File transfer",
+        SVC_CURRENT_TIME to "Current time",
+        SVC_CURRENT_LOCATION to "Current location",
     )
 
     /**
      * Subscriptions made during registration, in the order GeoShutter found the X100VI accepts:
      * the two indications first, then notifications. A missing one is logged and skipped.
+     *
+     * LOCATION_SYNC_STATE (the camera's location request) is left out unless location sync is on:
+     * in two field logs from an X100VI, every transfer the camera dropped came 1–2 s after a
+     * location request that went unanswered.
      */
     val REGISTRATION_SUBSCRIPTIONS: List<GattChar> = listOf(
-        AP_STATE, TRANSFER_STATE, DATE_SYNC_STATE, LOCATION_SYNC_STATE, CAMERA_NAME, LOGGING_SETTING,
+        AP_STATE, TRANSFER_STATE, DATE_SYNC_STATE, CAMERA_NAME, LOGGING_SETTING,
     )
+
+    /** Optional subscriptions that keep the status screen live. Failures are skipped. */
+    val LIVE_SUBSCRIPTIONS: List<GattChar> = listOf(
+        POWER_KEY_STATE, REMOTE_BOOT_SETTING, LOCATION_SYNC_SETTING, LOCATION_SYNC_CYCLE, CAMERA_VITAL_STATE,
+    )
+
+    /** Location sync choices the camera accepts, in seconds (XApp's list). */
+    val LOCATION_SYNC_INTERVALS: List<Int> = listOf(10, 15, 20, 30, 60, 120, 240, 480)
 }

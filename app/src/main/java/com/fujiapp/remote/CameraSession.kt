@@ -14,6 +14,7 @@ import com.fujiapp.remote.ble.FileTransferException
 import com.fujiapp.remote.ble.FoundCamera
 import com.fujiapp.remote.ble.FujiCamera
 import com.fujiapp.remote.ble.FujiGatt
+import com.fujiapp.remote.ble.FujiProtocol
 import com.fujiapp.remote.ble.GattClient
 import com.fujiapp.remote.ble.GattException
 import com.fujiapp.remote.ble.NoAnswerException
@@ -21,8 +22,11 @@ import com.fujiapp.remote.ble.UnsupportedCameraException
 import com.fujiapp.remote.data.BackupStore
 import com.fujiapp.remote.model.BackupMeta
 import com.fujiapp.remote.model.CameraInfo
+import com.fujiapp.remote.model.CameraSnapshot
 import com.fujiapp.remote.model.CameraVitals
-import com.fujiapp.remote.util.ProtocolLog
+import com.fujiapp.remote.util.AppLog
+import com.fujiapp.remote.util.AppSettings
+import com.fujiapp.remote.util.PhoneLocation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +43,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
+import java.time.Instant
+import java.time.ZoneId
 
 /** Connection state shown by the UI. */
 sealed interface ConnState {
@@ -46,7 +52,13 @@ sealed interface ConnState {
     /** Cameras seen so far; [active] while the scan is still running. */
     data class Scanning(val cameras: List<FoundCamera>, val active: Boolean) : ConnState
     data class Connecting(val message: String) : ConnState
-    data class Connected(val info: CameraInfo, val capabilities: Capabilities) : ConnState
+    data class Connected(
+        val snapshot: CameraSnapshot,
+        val capabilities: Capabilities,
+        val hasShutter: Boolean,
+    ) : ConnState {
+        val info: CameraInfo get() = snapshot.info
+    }
     data class Error(val message: String) : ConnState
 }
 
@@ -70,7 +82,7 @@ sealed interface RestoreState {
 sealed interface VitalsState {
     data object Idle : VitalsState
     data object Loading : VitalsState
-    data class Loaded(val vitals: CameraVitals) : VitalsState
+    data class Loaded(val vitals: CameraVitals, val readAt: Long) : VitalsState
     data class Failed(val message: String) : VitalsState
 }
 
@@ -78,13 +90,14 @@ sealed interface VitalsState {
 private class PairingFailedException(message: String) : IOException(message)
 
 /**
- * Owns the Bluetooth connection to the camera: scanning, pairing, registration, camera info,
- * shutter count, backups and restores. One instance per process, held by [App].
+ * Owns the Bluetooth connection to the camera: scanning, pairing, registration, live status,
+ * clock and location sync, camera settings, the remote shutter, shutter count, backups and
+ * restores. One instance per process, held by [App].
  *
- * The camera's Bluetooth link is flaky in practice (seen on an X100VI: refused writes right after
- * connecting, an empty service list after a quick reconnect, the camera dropping the link), and a
- * fresh connection reliably fixes it. So connecting retries, a dropped link reconnects on its own,
- * and backups / shutter-count reads retry once on a fresh connection.
+ * The camera's link is flaky in practice (refused writes right after connecting, an empty service
+ * list after a quick reconnect, dropped links), and a fresh connection reliably fixes it. So
+ * connecting retries, a dropped link reconnects on its own, and backups / shutter-count reads
+ * retry once on a fresh connection.
  */
 @SuppressLint("MissingPermission")
 class CameraSession(context: Context) {
@@ -94,6 +107,8 @@ class CameraSession(context: Context) {
     private val prefs = app.getSharedPreferences("cameras", Context.MODE_PRIVATE)
 
     val store = BackupStore(app)
+    val settings = AppSettings(app)
+    val location = PhoneLocation(app)
 
     private val _state = MutableStateFlow<ConnState>(ConnState.Idle)
     val state: StateFlow<ConnState> = _state.asStateFlow()
@@ -107,15 +122,17 @@ class CameraSession(context: Context) {
     private val _vitals = MutableStateFlow<VitalsState>(VitalsState.Idle)
     val vitals: StateFlow<VitalsState> = _vitals.asStateFlow()
 
-    /**
-     * One camera operation at a time (info read or file transfer): the camera runs a single
-     * transfer on its file service, and interleaving reads with a transfer is asking for trouble.
-     */
+    /** Short messages for the user (a setting written, a shot taken, a time sync). */
+    private val _notice = MutableStateFlow<String?>(null)
+    val notice: StateFlow<String?> = _notice.asStateFlow()
+
+    /** One camera operation at a time (info read, setting write or file transfer). */
     private val opLock = Mutex()
 
     private var scanJob: Job? = null
     private var connectJob: Job? = null
     private var transferJob: Job? = null
+    private var monitorJob: Job? = null
     private var gatt: GattClient? = null
     private var camera: FujiCamera? = null
     private var userDisconnected = false
@@ -125,10 +142,17 @@ class CameraSession(context: Context) {
 
     val isConnected: Boolean get() = _state.value is ConnState.Connected
 
-    /** True while a camera operation (backup, restore, shutter count, info refresh) is running. */
+    /** True while a camera operation (backup, restore, shutter count, refresh) is running. */
     val isTransferring: Boolean get() = opLock.isLocked
 
-    // ---- paired cameras ----
+    fun clearNotice() { _notice.value = null }
+
+    private fun notify(message: String) {
+        AppLog.add("notice: $message")
+        _notice.value = message
+    }
+
+    // ---- paired cameras and their identification numbers ----
 
     /** Cameras this app registered with that are still bonded to the phone. */
     fun pairedCameras(): List<BluetoothDevice> {
@@ -140,15 +164,24 @@ class CameraSession(context: Context) {
         }
     }
 
-    private fun remember(device: BluetoothDevice, model: String?) {
+    private fun remember(device: BluetoothDevice, model: String?, id: Long) {
         val addresses = (prefs.getStringSet(KEY_ADDRESSES, emptySet()) ?: emptySet()) + device.address
         val names = (prefs.getStringSet(KEY_NAMES, emptySet()) ?: emptySet()) +
             listOfNotNull(model, runCatching { device.name }.getOrNull())
         prefs.edit {
             putStringSet(KEY_ADDRESSES, addresses)
             putStringSet(KEY_NAMES, names)
+            putLong(KEY_ID_PREFIX + device.address, id)
+            putLong(KEY_LAST_ID, id)
         }
     }
+
+    /** The identification number this phone registered with, for [device] (or the last camera). */
+    private fun storedId(device: BluetoothDevice): Long? = when {
+        prefs.contains(KEY_ID_PREFIX + device.address) -> prefs.getLong(KEY_ID_PREFIX + device.address, 0)
+        prefs.contains(KEY_LAST_ID) -> prefs.getLong(KEY_LAST_ID, 0)
+        else -> null
+    }?.takeIf { it != 0L }
 
     // ---- scanning ----
 
@@ -160,6 +193,7 @@ class CameraSession(context: Context) {
         }
         if (_state.value is ConnState.Connecting || _state.value is ConnState.Connected) return
         scanJob?.cancel()
+        AppLog.add("scan: start")
         val found = LinkedHashMap<String, FoundCamera>()
         _state.value = ConnState.Scanning(emptyList(), active = true)
         scanJob = scope.launch {
@@ -167,6 +201,7 @@ class CameraSession(context: Context) {
                 // Stop on its own: a camera advertises within seconds, longer only drains the battery.
                 withTimeoutOrNull(SCAN_TIMEOUT_MS) {
                     CameraScanner(a).scan().collect { cam ->
+                        if (cam.device.address !in found) AppLog.add("scan: found ${cam.name} ${cam.advert}")
                         found[cam.device.address] = cam
                         _state.value = ConnState.Scanning(found.values.toList(), active = true)
                     }
@@ -175,6 +210,7 @@ class CameraSession(context: Context) {
             } catch (c: CancellationException) {
                 throw c
             } catch (t: Throwable) {
+                AppLog.error("scan", t)
                 _state.value = ConnState.Error(t.message ?: "Bluetooth scan failed.")
             }
         }
@@ -209,9 +245,10 @@ class CameraSession(context: Context) {
     private suspend fun connectLoop(device: BluetoothDevice, waitForCamera: Boolean) {
         var attempt = 0
         var reconnecting = false
+        var storedRejected = false
         while (true) {
             attempt++
-            val client = GattClient(app, device) { ProtocolLog.add(it) }
+            val client = GattClient(app, device) { AppLog.add(it) }
             gatt = client
             try {
                 val wait = waitForCamera || reconnecting || attempt > 1
@@ -219,27 +256,34 @@ class CameraSession(context: Context) {
                     when {
                         reconnecting -> "Connection lost. Reconnecting…"
                         attempt > 1 -> "Retrying ($attempt of $MAX_ATTEMPTS)…"
-                        waitForCamera -> "Waiting for the camera. Switch it on (or off and on again)."
+                        waitForCamera -> "Waiting for the camera. Switch it on, or off and on again."
                         else -> "Connecting…"
                     }
                 )
-                setUp(client, device, autoConnect = wait, timeoutMs = if (waitForCamera && attempt == 1) 90_000 else 30_000)
+                val usedStored = setUp(
+                    client, device, autoConnect = wait,
+                    timeoutMs = if (waitForCamera && attempt == 1) 90_000 else 30_000,
+                    preferCameraValue = storedRejected,
+                )
+                if (usedStored) storedRejected = false
                 attempt = 0
                 reconnecting = false
 
                 client.disconnected.first { it }
                 if (gatt !== client || userDisconnected) return
-                ProtocolLog.add("connection lost, reconnecting")
+                AppLog.add("connection lost, reconnecting")
                 cleanup()
                 reconnecting = true
             } catch (c: CancellationException) {
                 throw c
             } catch (t: Throwable) {
-                ProtocolLog.add("connect attempt $attempt failed: $t")
+                AppLog.add("connect attempt $attempt failed: $t")
+                if (t is RegistrationRejected && t.usedStored) storedRejected = true
                 if (gatt === client) cleanup()
                 if (userDisconnected) return
-                if (!isTemporary(t) || attempt >= MAX_ATTEMPTS) {
-                    _state.value = ConnState.Error(if (reconnecting) "The camera disconnected." else friendly(t))
+                val cause = (t as? RegistrationRejected)?.cause ?: t
+                if (!isTemporary(cause) || attempt >= MAX_ATTEMPTS) {
+                    _state.value = ConnState.Error(if (reconnecting) "The camera disconnected." else friendly(cause))
                     return
                 }
                 delay(RETRY_DELAY_MS)
@@ -247,10 +291,23 @@ class CameraSession(context: Context) {
         }
     }
 
-    /** Link, pair if needed, register and read the camera info. Ends in [ConnState.Connected]. */
-    private suspend fun setUp(client: GattClient, device: BluetoothDevice, autoConnect: Boolean, timeoutMs: Long) {
+    /** Registration failed; remembers whether the stored identification number was written. */
+    private class RegistrationRejected(val usedStored: Boolean, override val cause: Throwable) : IOException(cause.message, cause)
+
+    /**
+     * Link, pair if needed, register, read everything and start listening. Ends in
+     * [ConnState.Connected]. Returns whether the stored identification number was used.
+     */
+    private suspend fun setUp(
+        client: GattClient,
+        device: BluetoothDevice,
+        autoConnect: Boolean,
+        timeoutMs: Long,
+        preferCameraValue: Boolean,
+    ): Boolean {
         client.connect(autoConnect = autoConnect, timeoutMs = timeoutMs)
 
+        var freshPairing = false
         if (device.bondState != BluetoothDevice.BOND_BONDED) {
             _state.value = ConnState.Connecting(PAIRING_MESSAGE)
             if (!Bonding.bond(app, device)) {
@@ -259,20 +316,83 @@ class CameraSession(context: Context) {
                         "and confirm the code on both the camera and the phone."
                 )
             }
+            freshPairing = true
+            AppLog.add("paired with ${device.address}")
         }
 
         runCatching { client.requestMtu() }
         client.discoverServices(required = listOf(FujiGatt.SVC_CONNECTED_DEVICE, FujiGatt.SVC_LEGACY_PAIRING))
 
-        val cam = FujiCamera(client) { ProtocolLog.add(it) }
-        cam.register(onWaitingForPairing = { _state.value = ConnState.Connecting(PAIRING_MESSAGE) })
-        val info = cam.readInfo()
+        val cam = FujiCamera(client) { AppLog.add(it) }
+        val stored = if (preferCameraValue) null else storedId(device)
+        val listenForLocation = settings.locationSync && location.hasPermission()
+        val id = try {
+            cam.register(stored, freshPairing, listenForLocation) { _state.value = ConnState.Connecting(PAIRING_MESSAGE) }
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            throw RegistrationRejected(usedStored = stored != null && !freshPairing, cause = t)
+        }
+        val snapshot = cam.readSnapshot()
         camera = cam
-        remember(device, info.model)
-        _state.value = ConnState.Connected(info, cam.capabilities)
+        remember(device, snapshot.info.model, id)
+        _state.value = ConnState.Connected(snapshot, cam.capabilities, cam.hasShutter)
+        AppLog.add("connected: ${snapshot.info.displayName} fw ${snapshot.info.firmware}")
+        startMonitor(client, cam)
+        if (listenForLocation) location.start()
+        return stored != null && !freshPairing
+    }
+
+    /** React to what the camera pushes: time and location requests, and live status values. */
+    private fun startMonitor(client: GattClient, cam: FujiCamera) {
+        monitorJob?.cancel()
+        monitorJob = scope.launch {
+            client.values.collect { (uuid, value) ->
+                when (uuid) {
+                    FujiGatt.DATE_SYNC_STATE.uuid -> if (FujiProtocol.u16(value) == 1 && settings.syncTime) launch {
+                        try {
+                            cam.sendTime(Instant.now(), ZoneId.systemDefault())
+                            AppLog.add("time sync: sent the phone's clock")
+                        } catch (t: Throwable) {
+                            if (t !is CancellationException) AppLog.add("time sync failed: $t")
+                        }
+                    }
+                    FujiGatt.LOCATION_SYNC_STATE.uuid -> if (FujiProtocol.u16(value) == 1 && settings.locationSync) launch {
+                        answerLocationRequest(cam)
+                    }
+                }
+                FujiGatt.READABLE.firstOrNull { it.uuid == uuid }?.let { c -> updateSnapshot { it.with(c, value) } }
+            }
+        }
+    }
+
+    private suspend fun answerLocationRequest(cam: FujiCamera) {
+        val fix = location.current()
+        if (fix == null) {
+            AppLog.add("location request: no recent fix yet")
+            return
+        }
+        try {
+            cam.sendLocation(
+                FujiProtocol.geotagPacket(
+                    fix.latitude, fix.longitude,
+                    if (fix.hasAltitude()) fix.altitude else 0.0,
+                    if (fix.hasSpeed()) fix.speed.toDouble() else 0.0,
+                    Instant.now(),
+                )
+            )
+            AppLog.add("location request: answered (fix ${(System.currentTimeMillis() - fix.time) / 1000} s old)")
+        } catch (t: Throwable) {
+            if (t !is CancellationException) AppLog.add("location answer failed: $t")
+        }
+    }
+
+    private fun updateSnapshot(change: (CameraSnapshot) -> CameraSnapshot) {
+        val s = _state.value as? ConnState.Connected ?: return
+        _state.value = s.copy(snapshot = change(s.snapshot))
     }
 
     fun disconnect() {
+        AppLog.add("disconnect (user)")
         userDisconnected = true
         connectJob?.cancel()
         transferJob?.cancel()
@@ -282,6 +402,9 @@ class CameraSession(context: Context) {
     }
 
     private fun cleanup() {
+        monitorJob?.cancel()
+        monitorJob = null
+        location.stop()
         gatt?.close()
         gatt = null
         camera = null
@@ -296,7 +419,7 @@ class CameraSession(context: Context) {
 
     /** Drop the link on purpose; [connectLoop] then reconnects. */
     private fun forceReconnect() {
-        ProtocolLog.add("reconnecting to recover")
+        AppLog.add("reconnecting to recover")
         gatt?.close()
     }
 
@@ -318,23 +441,98 @@ class CameraSession(context: Context) {
             fresh
         }
 
+    // ---- app settings ----
+
+    fun setSyncTime(on: Boolean) {
+        settings.syncTime = on
+        AppLog.ui("setting: sync time = $on")
+    }
+
+    /** Turn location sync on or off. The caller has asked for the location permission. */
+    fun setLocationSync(on: Boolean) {
+        settings.locationSync = on
+        AppLog.ui("setting: location sync = $on")
+        val cam = camera ?: return
+        scope.launch {
+            runCatching { cam.setLocationRequests(on && location.hasPermission()) }
+                .onFailure { AppLog.add("location requests ${if (on) "on" else "off"} failed: $it") }
+        }
+        if (on) location.start() else location.stop()
+    }
+
     // ---- camera operations ----
 
-    /** Read the camera info again, then the shutter count. */
+    /** Read everything the camera reports again, then the shutter count. */
     fun refreshAll() {
+        AppLog.ui("refresh")
         scope.launch {
             opLock.withLock {
                 val cam = camera ?: return@withLock
                 try {
-                    val info = cam.readInfo()
-                    _state.value = ConnState.Connected(info, cam.capabilities)
+                    val fresh = cam.readSnapshot()
+                    updateSnapshot { old -> CameraSnapshot(old.values + fresh.values) }
                 } catch (c: CancellationException) {
                     throw c
                 } catch (t: Throwable) {
-                    ProtocolLog.add("refresh failed: $t")
+                    AppLog.add("refresh failed: $t")
                 }
             }
             if ((_state.value as? ConnState.Connected)?.capabilities?.vitals == true) fetchVitals()
+        }
+    }
+
+    /** Write a camera setting, then read it back so the screen shows what the camera holds. */
+    private fun writeSetting(what: String, readBack: com.fujiapp.remote.ble.GattChar, write: suspend (FujiCamera) -> Unit) {
+        AppLog.ui("camera setting: $what")
+        scope.launch {
+            opLock.withLock {
+                val cam = camera ?: return@withLock
+                try {
+                    write(cam)
+                    cam.read(readBack)?.let { v -> updateSnapshot { it.with(readBack, v) } }
+                    notify("Camera updated: $what")
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (t: Throwable) {
+                    AppLog.add("setting failed ($what): $t")
+                    notify("Couldn't change $what: ${friendly(t)}")
+                }
+            }
+        }
+    }
+
+    fun setCameraLocationSync(on: Boolean) =
+        writeSetting("location sync ${if (on) "on" else "off"}", FujiGatt.LOCATION_SYNC_SETTING) { it.setLocationSyncSetting(on) }
+
+    fun setCameraLocationInterval(seconds: Int) =
+        writeSetting("location interval $seconds s", FujiGatt.LOCATION_SYNC_CYCLE) { it.setLocationSyncInterval(seconds) }
+
+    fun setCameraConnectWhileOff(on: Boolean) =
+        writeSetting("connect while off ${if (on) "on" else "off"}", FujiGatt.REMOTE_BOOT_SETTING) { it.setConnectWhilePowerOff(on) }
+
+    /** Remote release: press = half press (focus), release with [shoot] = full press, then let go. */
+    fun shutterPress() {
+        val cam = camera ?: return
+        AppLog.ui("shutter: half press")
+        scope.launch { runCatching { cam.shutter(FujiCamera.SHUTTER_HALF) }.onFailure { AppLog.add("shutter failed: $it") } }
+    }
+
+    fun shutterRelease(shoot: Boolean) {
+        val cam = camera ?: return
+        AppLog.ui(if (shoot) "shutter: full press" else "shutter: cancelled")
+        scope.launch {
+            try {
+                if (shoot) {
+                    cam.shutter(FujiCamera.SHUTTER_FULL)
+                    delay(120)
+                }
+                cam.shutter(FujiCamera.SHUTTER_RELEASE)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                AppLog.add("shutter failed: $t")
+                notify("The camera didn't take the shot: ${friendly(t)}")
+            }
         }
     }
 
@@ -360,7 +558,7 @@ class CameraSession(context: Context) {
                     throw c
                 } catch (t: Throwable) {
                     if (!retryOnFreshConnection || t is UnsupportedCameraException || userDisconnected) throw t
-                    ProtocolLog.add("operation failed ($t), retrying on a fresh connection")
+                    AppLog.add("operation failed ($t), retrying on a fresh connection")
                     // If this connection is still up, drop it; if it already dropped, connectLoop is on it.
                     if (camera === cam) forceReconnect()
                     val fresh = awaitNewConnection(cam) ?: throw t
@@ -383,9 +581,12 @@ class CameraSession(context: Context) {
         // Set before starting: the operation may finish (fail) before operation() returns.
         _vitals.value = VitalsState.Loading
         val started = operation(retryOnFreshConnection = true, op = { cam -> cam.readVitals() }) { result ->
-            result.onSuccess { _vitals.value = VitalsState.Loaded(it) }
+            result.onSuccess {
+                AppLog.add("vitals: ${it.totalShots} shots, ${it.mechanicalShutter} actuations")
+                _vitals.value = VitalsState.Loaded(it, System.currentTimeMillis())
+            }
             result.onFailure {
-                ProtocolLog.add("vitals failed: $it")
+                AppLog.add("vitals failed: $it")
                 _vitals.value = VitalsState.Failed(friendly(it))
             }
         }
@@ -394,6 +595,7 @@ class CameraSession(context: Context) {
 
     /** Start a backup; false if another operation is running. */
     fun startBackup(name: String): Boolean {
+        AppLog.ui("backup: start \"$name\"")
         val previous = _backup.value
         _backup.value = BackupState.Running(0)
         val started = operation(
@@ -405,9 +607,12 @@ class CameraSession(context: Context) {
                 withContext(Dispatchers.IO) { store.save(name, info, file) }
             },
         ) { result ->
-            result.onSuccess { _backup.value = BackupState.Done(it) }
+            result.onSuccess {
+                AppLog.add("backup saved: ${it.name}, ${it.size} bytes")
+                _backup.value = BackupState.Done(it)
+            }
             result.onFailure {
-                ProtocolLog.add("backup failed: $it")
+                AppLog.add("backup failed: $it")
                 _backup.value = BackupState.Failed(friendly(it))
             }
         }
@@ -434,6 +639,7 @@ class CameraSession(context: Context) {
      * A restore changes the camera, so it never retries on its own.
      */
     fun startRestore(meta: BackupMeta): Boolean {
+        AppLog.ui("restore: start \"${meta.name}\"")
         restoreBlocker(meta)?.let {
             _restore.value = RestoreState.Failed(it)
             return false
@@ -447,9 +653,12 @@ class CameraSession(context: Context) {
                 cam.restore(data) { sent, total -> _restore.value = RestoreState.Running(meta.name, sent, total) }
             },
         ) { result ->
-            result.onSuccess { _restore.value = RestoreState.Done(meta.name) }
+            result.onSuccess {
+                AppLog.add("restore done: ${meta.name}")
+                _restore.value = RestoreState.Done(meta.name)
+            }
             result.onFailure {
-                ProtocolLog.add("restore failed: $it")
+                AppLog.add("restore failed: $it")
                 val message = if (it is GattException || it is NoAnswerException) {
                     "The connection dropped before the restore finished. Try again."
                 } else {
@@ -484,6 +693,8 @@ class CameraSession(context: Context) {
     private companion object {
         const val KEY_ADDRESSES = "addresses"
         const val KEY_NAMES = "names"
+        const val KEY_ID_PREFIX = "id:"
+        const val KEY_LAST_ID = "id:last"
         const val SCAN_TIMEOUT_MS = 30_000L
         const val MAX_ATTEMPTS = 3
         const val RETRY_DELAY_MS = 1_500L

@@ -13,7 +13,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -48,6 +51,10 @@ class GattClient(
     @Volatile private var pending: CompletableDeferred<OpResult>? = null
     private val connected = CompletableDeferred<Unit>()
     private val channels = ConcurrentHashMap<UUID, Channel<ByteArray>>()
+
+    private val _values = MutableSharedFlow<Pair<UUID, ByteArray>>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    /** Every value the camera pushes (notifications and indications), as (characteristic, value). */
+    val values: SharedFlow<Pair<UUID, ByteArray>> = _values.asSharedFlow()
 
     private val _disconnected = MutableStateFlow(false)
     /** Becomes true once the link is gone (camera switched off, out of range, or [close]). */
@@ -110,6 +117,7 @@ class GattClient(
     private fun deliver(uuid: UUID, value: ByteArray) {
         log("← ${nameOf(uuid)}: ${FujiProtocol.hex(value)}")
         channels[uuid]?.trySend(value.copyOf())
+        _values.tryEmit(uuid to value.copyOf())
     }
 
     private fun nameOf(uuid: UUID): String =

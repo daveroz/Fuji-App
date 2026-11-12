@@ -1,8 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.FujiRemote" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/fuji_green</item>
-        <item name="colorPrimaryDark">@color/fuji_green</item>
-        <item name="colorSecondary">@color/fuji_green_light</item>
+    <!-- Night stage, amber key light (Deco look); dialogs follow it -->
+    <style name="Theme.FujiRemote" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/amber</item>
+        <item name="colorOnPrimary">@color/night</item>
+        <item name="colorSecondary">@color/amber_light</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorSurfaceContainerHigh">@color/surface_hi</item>
+        <item name="colorOnSurface">@color/text</item>
+        <item name="colorOnSurfaceVariant">@color/muted</item>
+        <item name="colorAccent">@color/amber</item>
+        <item name="android:colorControlActivated">@color/amber</item>
+        <item name="android:windowBackground">@color/night</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:textColorHint">@color/muted</item>
     </style>
 </resources>
