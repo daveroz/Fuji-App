@@ -31,13 +31,22 @@
     <!-- Camera info -->
     <string name="refresh">Refresh</string>
     <string name="not_connected_hint">Connect to the camera first.</string>
-    <string name="shutter_count_title">Shutter count</string>
-    <string name="shutter_count_pending">Not available in this version yet. The camera sends its shutter and usage counters over Bluetooth, but the request that asks for them isn\'t publicly documented. Support will be added once it is confirmed.</string>
+    <string name="shutter_count_title">Shutter count &amp; usage</string>
+    <string name="vitals_loading">Reading the camera\'s counters…</string>
+    <string name="vitals_failed">Couldn\'t read the counters: %1$s</string>
+    <string name="vitals_unsupported">This camera doesn\'t share its shutter count over Bluetooth.</string>
+    <string name="vitals_read">Read shutter count</string>
 
     <!-- Backups -->
-    <string name="backups_intro">A backup is the camera\'s own settings file. It holds every setting, including your C1–C7 custom settings with your film-simulation recipes.</string>
-    <string name="restore_pending">Restoring a backup to the camera over Bluetooth isn\'t available in this version yet.</string>
+    <string name="backups_intro">A backup is the camera\'s own settings file. It holds every setting, including your C1–C7 custom settings with your film-simulation recipes. Restoring puts all of them back, onto the same camera model.</string>
     <string name="backup_now">Back up camera settings</string>
+    <string name="restore">Restore</string>
+    <string name="restore_confirm_title">Restore \"%1$s\"?</string>
+    <string name="restore_confirm_body">This replaces ALL the camera\'s settings, including C1–C7, with the ones in this backup. Keep the camera on and nearby until it finishes.\n\nTip: back up the current settings first.</string>
+    <string name="restore_running">Restoring \"%1$s\"… %2$d%%</string>
+    <string name="restore_done">Restored \"%1$s\". The camera may restart to apply the settings.</string>
+    <string name="restore_failed">Restore failed: %1$s</string>
+    <string name="busy_transfer">Wait for the current transfer to finish.</string>
     <string name="backup_name_hint">Backup name</string>
     <string name="backup_running">Receiving backup… %1$s</string>
     <string name="backup_done">Saved \"%1$s\" (%2$s)</string>

@@ -18,6 +18,9 @@ data class GattChar(val service: UUID, val uuid: UUID, val name: String)
  *    sarmadjari/GeoShutter `docs/fujifilm-protocol.md`.
  *  - Settings-backup file transfer, from XApp 2.2.1: Th0rgal/fuji-bridge `FujiBackup.swift`.
  *  - Camera information names and value formats: FUJIFILM Camera Remote 4.10.2 (`BTCamera`).
+ *  - Restore, camera vital data (shutter count) and the transfer state/result values: static
+ *    analysis of FUJIFILM XApp 2.7.6 for interoperability (`BTConstans`, `BTCameraModel`). Only
+ *    identifiers, byte values and the order of operations were taken.
  *
  * No camera firmware is touched: this is the same Bluetooth interface Fujifilm's XApp uses.
  */
@@ -90,12 +93,22 @@ object FujiGatt {
     val LOCATION_SYNC_STATE = GattChar(SVC_CAMERA_STATE, uuid("ad06c7b7-f41a-46f4-a29a-712055319122"), "Location sync state")
     /** uint16 indication: 1 = backup ready to transfer, 0 = camera busy. */
     val BACKUP_STATE = GattChar(SVC_CAMERA_STATE, uuid("11438c83-cfb0-4511-841b-759e0d2321c8"), "Backup state")
+    /** uint16 indication: 1 = camera ready to receive a restore, 0 = not now. */
+    val RESTORE_STATE = GattChar(SVC_CAMERA_STATE, uuid("4b3a413c-230f-42bc-b3ed-b1db2eadee82"), "Restore state")
+    /** uint16 indication: 1 = log / vital data ready to transfer. */
+    val LOG_TRANSFER_STATE = GattChar(SVC_CAMERA_STATE, uuid("2f6cb772-1d69-448e-8819-fe6b5c20b094"), "Log transfer state")
+    /** uint16 notify: 1 = the camera's vital data changed. */
+    val CAMERA_VITAL_STATE = GattChar(SVC_CAMERA_STATE, uuid("e6692c5c-b7cd-44f4-95fc-eda07ce32560"), "Camera vital state")
 
     // ---- Camera control (furble: "shutter" service) ----
 
     val SVC_CAMERA_CONTROL: UUID = uuid("6514eb81-4e8f-458d-aa2a-e691336cdfac")
     /** uint16: 1 = camera settings (2 would be IPTC). */
     val BACKUP_REQUEST = GattChar(SVC_CAMERA_CONTROL, uuid("f14e7a88-6f57-4872-a69b-b47ef3295c9b"), "Backup request")
+    /** uint16: 1 = camera settings (2 would be IPTC). */
+    val RESTORE_REQUEST = GattChar(SVC_CAMERA_CONTROL, uuid("f1897eb9-a9aa-40f0-8ce6-2fa7915bc459"), "Restore request")
+    /** uint16: 1 = activity logs, 2 = camera vital data (shutter count etc.). */
+    val LOG_TRANSFER_REQUEST = GattChar(SVC_CAMERA_CONTROL, uuid("2674f0b0-f909-4e73-8656-338e9c74457f"), "Log transfer request")
 
     // ---- Camera startup information (XApp: CAMERA_STARTUP_INFORMATION_RED) ----
 
@@ -118,8 +131,10 @@ object FujiGatt {
     val FILE_PARTIAL_DATA = GattChar(SVC_FILE, uuid("ac0c799a-fa6c-4df5-bbc5-bb95cce7e6ea"), "File partial data")
     /** uint16: 3 = finished, 0 = abort. */
     val FILE_TRANSFER_RESULT = GattChar(SVC_FILE, uuid("68052e8a-fb91-404f-8847-0eb4be24308c"), "File transfer result")
-    /** Notify, uint16 first: 1/2 = a chunk is ready, 3 = file complete. */
+    /** Notify, 4 bytes: uint16 state (see [FileTransfer]), uint16 sequence number. */
     val FILE_TRANSACTION_STATE = GattChar(SVC_FILE, uuid("2e27ed9f-5506-41cd-ba48-dac06669ad95"), "File transaction state")
+    /** uint32: number of files waiting (activity logs). */
+    val FILE_NUMBER = GattChar(SVC_FILE, uuid("e3fbbfcf-f326-4b0f-82cf-b00ae1b107a2"), "File number")
 
     /** Services a secure camera advertises: in PAIRING REGISTRATION, and when bonded and looking for its phone. */
     val ADVERTISED_PAIRING: UUID = SVC_CAMERA_INFORMATION
@@ -131,8 +146,9 @@ object FujiGatt {
         SOFTWARE_REVISION, BLE_PROTOCOL_VERSION, CAMERA_SERIAL_NUMBER, CAMERA_MAC_ADDRESS, LENS_PRODUCT_NAME,
         LENS_FIRMWARE_VERSION, DEVICE_IDENTIFICATION_NUMBER, CONNECTED_DEVICE_NAME, CAMERA_NAME, LOGGING_SETTING,
         PAIRING_SMART_DEVICE_NUM, AP_STATE, TRANSFER_STATE, DATE_SYNC_STATE, LOCATION_SYNC_STATE, BACKUP_STATE,
-        BACKUP_REQUEST, POWER_KEY_STATE, REMOTE_BOOT_SETTING, FILE_TRANSFER_INDEX, FILE_INFORMATION,
-        FILE_PARTIAL_SIZE, FILE_PARTIAL_DATA, FILE_TRANSFER_RESULT, FILE_TRANSACTION_STATE,
+        RESTORE_STATE, LOG_TRANSFER_STATE, CAMERA_VITAL_STATE, BACKUP_REQUEST, RESTORE_REQUEST, LOG_TRANSFER_REQUEST,
+        POWER_KEY_STATE, REMOTE_BOOT_SETTING, FILE_TRANSFER_INDEX, FILE_INFORMATION, FILE_PARTIAL_SIZE,
+        FILE_PARTIAL_DATA, FILE_TRANSFER_RESULT, FILE_TRANSACTION_STATE, FILE_NUMBER,
     )
 
     val SERVICE_NAMES: Map<UUID, String> = mapOf(
