@@ -103,10 +103,12 @@ Every push uploads `FujiRemote.apk` as a build artifact.
 
 ### Stable signing (optional)
 
-To publish to the `app-latest` release and keep a stable upgrade key, add these repository secrets:
-`FUJI_KEYSTORE_BASE64`, `FUJI_KEYSTORE_PASSWORD`, `FUJI_KEY_ALIAS`, `FUJI_KEY_PASSWORD`. Without
-them the APK is signed with a throwaway debug key. That's fine for sideloading, but it won't upgrade
-a differently-signed install.
+To publish to the `app-latest` release and keep a stable upgrade key, add one repository secret:
+`FUJI_KEYSTORE_BASE64`, the keystore file as one line of base64 (`base64 -w0 release.jks`). The build
+assumes the standard passwords `android` / alias `androiddebugkey`. A keystore with other values
+also needs `FUJI_KEYSTORE_PASSWORD`, `FUJI_KEY_ALIAS` and `FUJI_KEY_PASSWORD`. Without the secret,
+the APK is signed with a throwaway debug key. That's fine for sideloading, but it won't upgrade a
+differently-signed install.
 
 ---
 
