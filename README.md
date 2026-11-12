@@ -83,6 +83,14 @@ every write is a write with response. Every UUID, with its source, is in
 - **Shutter count**: the same download, started with `LOG_TRANSFER_REQUEST = 2` and
   `LOG_TRANSFER_STATE = 1`. The file is JSON (`total_shot_count`, `rear_curtain_shutter_count`,
   `shutter_upper_limit_count`, …).
+- **Every transfer** turns its notifications (`FILE_TRANSACTION_STATE` and the request's state)
+  on at the start and **off at the end**, as XApp does. While they're on, the camera keeps the
+  transfer session open, answers the next request with "busy", and dropped the link when another
+  transfer was forced on top. A "busy" or unanswered request gets `FILE_TRANSFER_RESULT = 2`
+  (cancel) and one more try.
+- **Recovery**: connecting retries up to 3 times, a dropped link reconnects on its own, and backups
+  and shutter-count reads retry once on a fresh connection. That fixed every failure in field logs
+  from an X100VI. A restore never retries on its own.
 - **Restore**: `RESTORE_REQUEST = 1` → wait for `RESTORE_STATE = 1` → chunk size 120, index 0, then
   `FILE_INFORMATION` (`"backup.dat"` padded to 40 bytes + `u32 size`) → wait for state 1 → write
   each chunk and wait for state 2 → state 3 means the camera has it all, then write

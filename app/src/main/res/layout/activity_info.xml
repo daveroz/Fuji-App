@@ -46,9 +46,17 @@
                     android:id="@+id/shutterHeadline"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:paddingBottom="4dp"
                     android:textSize="28sp"
                     android:textStyle="bold"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/shutterCaption"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:alpha="0.7"
+                    android:paddingBottom="6dp"
+                    android:text="@string/shots_taken"
                     android:visibility="gone" />
 
                 <com.google.android.material.progressindicator.LinearProgressIndicator

@@ -47,7 +47,8 @@ data class CameraVitals(
         }
         return listOf(
             "Total shots" to n(totalShots),
-            "Mechanical shutter" to n(mechanicalShutter),
+            // The X100VI's leaf shutter also moves when no picture is taken, so this exceeds the shots.
+            "Shutter actuations" to n(mechanicalShutter),
             "Electronic shutter" to n(electronicShutter),
             "Front curtain" to n(frontCurtain),
             "Rated shutter life" to limit,

@@ -46,6 +46,29 @@ class ModelTest {
         assertEquals(null, rows["Lens changes"]) // absent in the JSON, so not shown
     }
 
+    @Test fun x100vi_vital_data_without_optional_fields() {
+        // The keys an X100VI 1.31 sends (no front curtain, no battery_age); the values are made up.
+        val json = """
+            {"start_count":10,"total_shot_count":1200,"flash_count":0,"total_operation_second":7200,
+             "shooting_mode_operation_second":3600,"ok_switch_count":5,"s1_switch_count":9,"zoom_drive_steps":0,
+             "battery_end_detection":0,"usb_insertion_count":1,"dust_reduction_count":2,"lens_attachment_count":0,
+             "cmos_temp_performance":0,"cmos_temp_function":0,"cmos_temp_unguaranteed":0,"variable_finder_switching":3,
+             "command_dial_rotation":40,"command_dial_push":1,"evf_total_display_second":60,
+             "rear_curtain_shutter_count":1500,"shutter_exchange_count":0,"gps_positioning_second":0,
+             "electronic_shutter_count":0,"shutter_upper_limit_count":100000,
+             "cmos_cleaning_datetime":"","sensor_dust_check_datetime":"","temp_warning_count":0,
+             "temp_warning_power_off_count":0,"error_log":""}
+        """.trimIndent()
+        val v = CameraVitals.parse(json)
+        val rows = v.rows(Locale.US).associate { it.label to it.value }
+        assertEquals("1,200", rows["Total shots"])
+        assertEquals("1,500", rows["Shutter actuations"])
+        assertEquals("100,000 (1% used)", rows["Rated shutter life"])
+        assertEquals(null, rows["Front curtain"])
+        assertEquals(null, rows["Battery wear"])
+        assertEquals(null, rows["Last sensor cleaning"]) // empty string in the JSON
+    }
+
     @Test fun camera_info_hides_missing_fields_and_empty_sections() {
         val info = CameraInfo(model = "X100VI", cameraName = "FUJIFILM-X100VI-1A2B", firmware = "01.32", power = PowerState.ON)
         val sections = info.sections()

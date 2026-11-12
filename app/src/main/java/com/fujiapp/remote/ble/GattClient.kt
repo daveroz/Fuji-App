@@ -7,10 +7,10 @@ import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothProfile
-import android.bluetooth.BluetoothStatusCodes
 import android.content.Context
 import android.os.Build
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -134,11 +134,29 @@ class GattClient(
      * Android versions negotiate it on their own, so don't wait long for the answer.
      */
     suspend fun requestMtu(size: Int = 517) =
-        op("MTU $size", timeoutMs = 5_000) { it.requestMtu(size) }.also { log("MTU $mtu") }
+        op("MTU $size", timeoutMs = 5_000) { started(it.requestMtu(size)) }.also { log("MTU $mtu") }
 
-    suspend fun discoverServices() {
-        op("discover services", timeoutMs = 30_000) { it.discoverServices() }
-        log("services: " + (gatt?.services?.joinToString { nameOf(it.uuid) } ?: "none"))
+    /**
+     * Discover services until one of [required] shows up. Right after a reconnect Android can hand
+     * back a stale, empty list; then its cache is cleared and discovery runs again.
+     */
+    suspend fun discoverServices(required: Collection<UUID>) {
+        for (attempt in 1..DISCOVERY_ATTEMPTS) {
+            op("discover services", timeoutMs = 30_000) { started(it.discoverServices()) }
+            val services = gatt?.services.orEmpty()
+            log("services: " + services.joinToString { nameOf(it.uuid) })
+            if (services.any { it.uuid in required }) return
+            if (attempt == DISCOVERY_ATTEMPTS) return
+            log("service list incomplete, refreshing (attempt $attempt)")
+            refreshCache()
+            delay(600)
+        }
+    }
+
+    /** BluetoothGatt.refresh() is hidden; it clears Android's cached service list for this device. */
+    private fun refreshCache() {
+        val g = gatt ?: return
+        runCatching { g.javaClass.getMethod("refresh").invoke(g) }.onFailure { log("cache refresh unavailable") }
     }
 
     fun close() {
@@ -165,7 +183,7 @@ class GattClient(
 
     suspend fun read(c: GattChar): ByteArray {
         val ch = require(c)
-        val value = op("read ${c.name}") { it.readCharacteristic(ch) } ?: ByteArray(0)
+        val value = op("read ${c.name}") { started(it.readCharacteristic(ch)) } ?: ByteArray(0)
         log("read ${c.name}: ${FujiProtocol.hex(value)}")
         return value
     }
@@ -175,21 +193,21 @@ class GattClient(
         log("→ ${c.name}: ${FujiProtocol.hex(value)}")
         op("write ${c.name}") { g ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                g.writeCharacteristic(ch, value, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothStatusCodes.SUCCESS
+                g.writeCharacteristic(ch, value, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
             } else {
                 @Suppress("DEPRECATION")
                 ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
                 @Suppress("DEPRECATION")
                 ch.value = value
                 @Suppress("DEPRECATION")
-                g.writeCharacteristic(ch)
+                started(g.writeCharacteristic(ch))
             }
         }
     }
 
     /**
-     * Turn on notifications, or indications where the characteristic only indicates (as XApp does).
-     * Values start queueing for [awaitValue] before the descriptor is written.
+     * Turn on indications where the characteristic supports them, notifications otherwise (as
+     * XApp does). Values start queueing for [awaitValue] before the descriptor is written.
      */
     suspend fun subscribe(c: GattChar) {
         val ch = require(c)
@@ -197,21 +215,37 @@ class GattClient(
         val g = gatt ?: throw GattException("Not connected.")
         if (!g.setCharacteristicNotification(ch, true)) throw GattException("Couldn't enable ${c.name}.")
         val cccd = ch.getDescriptor(FujiGatt.CCCD) ?: throw GattException("${c.name} has no CCCD.")
-        val indicate = ch.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0 &&
-            ch.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY == 0
+        val indicate = ch.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
         val value = if (indicate) BluetoothGattDescriptor.ENABLE_INDICATION_VALUE else BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-        op("subscribe ${c.name}") { gg ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                gg.writeDescriptor(cccd, value) == BluetoothStatusCodes.SUCCESS
-            } else {
-                @Suppress("DEPRECATION")
-                cccd.value = value
-                @Suppress("DEPRECATION")
-                gg.writeDescriptor(cccd)
-            }
-        }
+        op("subscribe ${c.name}") { writeDescriptor(it, cccd, value) }
         log("subscribed ${c.name} (${if (indicate) "indications" else "notifications"})")
     }
+
+    /**
+     * Turn notifications / indications off again. XApp does this at the end of every file
+     * transfer; the camera keeps its transfer session open while they are on.
+     */
+    suspend fun unsubscribe(c: GattChar) {
+        val ch = find(c) ?: return
+        val g = gatt ?: return
+        g.setCharacteristicNotification(ch, false)
+        val cccd = ch.getDescriptor(FujiGatt.CCCD) ?: return
+        op("unsubscribe ${c.name}") { writeDescriptor(it, cccd, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE) }
+        drain(c)
+        log("unsubscribed ${c.name}")
+    }
+
+    private fun writeDescriptor(g: BluetoothGatt, d: BluetoothGattDescriptor, value: ByteArray): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            g.writeDescriptor(d, value)
+        } else {
+            @Suppress("DEPRECATION")
+            d.value = value
+            @Suppress("DEPRECATION")
+            started(g.writeDescriptor(d))
+        }
+
+    private fun started(ok: Boolean): Int = if (ok) STARTED else NOT_STARTED
 
     /** The next value the camera pushes on [c], or null after [timeoutMs]. */
     suspend fun awaitValue(c: GattChar, timeoutMs: Long): ByteArray? =
@@ -226,14 +260,27 @@ class GattClient(
     private fun channelFor(uuid: UUID): Channel<ByteArray> =
         channels.getOrPut(uuid) { Channel(capacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST) }
 
-    /** Run one GATT operation and wait for its callback. Returns the callback's value, if any. */
-    private suspend fun op(name: String, timeoutMs: Long = 15_000, start: (BluetoothGatt) -> Boolean): ByteArray? =
+    /**
+     * Run one GATT operation and wait for its callback. Returns the callback's value, if any.
+     * [start] returns Android's status code (0 = started). Android sometimes refuses to start an
+     * operation for a moment (e.g. while it is busy setting up the link), so a refused start is
+     * retried a few times, as XApp retries its requests.
+     */
+    private suspend fun op(name: String, timeoutMs: Long = 15_000, start: (BluetoothGatt) -> Int): ByteArray? =
         mutex.withLock {
             val g = gatt ?: throw GattException("Not connected.")
             val done = CompletableDeferred<OpResult>()
             pending = done
             try {
-                if (!start(g)) throw GattException("Couldn't start: $name.")
+                var code = start(g)
+                var attempt = 1
+                while (code != STARTED && attempt < START_ATTEMPTS && !_disconnected.value) {
+                    log("couldn't start $name (code $code), retrying")
+                    delay(START_RETRY_MS)
+                    code = start(g)
+                    attempt++
+                }
+                if (code != STARTED) throw GattException("Couldn't start: $name (code $code).")
                 val result = withTimeoutOrNull(timeoutMs) { done.await() }
                     ?: throw GattException("The camera didn't answer: $name.")
                 if (result.status != BluetoothGatt.GATT_SUCCESS) {
@@ -246,6 +293,13 @@ class GattClient(
         }
 
     companion object {
+        /** Android's status code for "operation started" (BluetoothStatusCodes.SUCCESS, API 31+). */
+        private const val STARTED = 0
+        private const val NOT_STARTED = -1
+        private const val START_ATTEMPTS = 4
+        private const val START_RETRY_MS = 250L
+        private const val DISCOVERY_ATTEMPTS = 3
+
         /** ATT errors that mean the link isn't encrypted with a bond yet. */
         fun isAuthError(status: Int): Boolean = status == 5 || status == 15 || status == 137
 

@@ -2,11 +2,15 @@ package com.fujiapp.remote.ble
 
 import com.fujiapp.remote.model.CameraInfo
 import com.fujiapp.remote.model.CameraVitals
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.io.IOException
 
 class UnsupportedCameraException(message: String) : IOException(message)
 class CameraBusyException(message: String) : IOException(message)
+/** The camera ignored a request; a fresh connection usually fixes it. */
+class NoAnswerException(message: String) : IOException(message)
 
 /** A file the camera sent over Bluetooth. */
 class DownloadedFile(val name: String, val data: ByteArray)
@@ -134,6 +138,53 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
         }
     }
 
+    /**
+     * Run one file transfer with its notifications on, and turn them off afterwards whatever
+     * happens, as XApp does (`enableNotifyToBackup/Restore/LogTransfer(true … false)`). Left on,
+     * the camera keeps the transfer session open: the next request gets "busy", and forcing a new
+     * transfer on top of it made the camera drop the link.
+     */
+    private suspend fun <T> transferSession(requestState: GattChar, block: suspend () -> T): T {
+        gatt.subscribe(FujiGatt.FILE_TRANSACTION_STATE)
+        gatt.subscribe(requestState)
+        try {
+            return block()
+        } finally {
+            if (!gatt.disconnected.value) {
+                withContext(NonCancellable) {
+                    runCatching { gatt.unsubscribe(FujiGatt.FILE_TRANSACTION_STATE) }
+                    runCatching { gatt.unsubscribe(requestState) }
+                }
+            }
+        }
+    }
+
+    /**
+     * Ask for a transfer and wait until the camera says it's ready. If it answers "busy" or not at
+     * all, close whatever transfer it still has open (FILE_TRANSFER_RESULT = cancel, which the
+     * camera ends with transaction state 5) and ask once more.
+     */
+    private suspend fun requestTransfer(request: GattChar, requestState: GattChar, value: Int, what: String) {
+        for (attempt in 1..2) {
+            gatt.drain(requestState)
+            gatt.drain(FujiGatt.FILE_TRANSACTION_STATE)
+            gatt.write(request, FujiProtocol.le16(value))
+            val answer = gatt.awaitValue(requestState, 10_000)
+            if (answer != null && FileTransfer.stateCode(answer) == FileTransfer.READY) return
+            log("$what request: ${if (answer == null) "no answer" else "busy"} (attempt $attempt)")
+            runCatching { gatt.write(FujiGatt.FILE_TRANSFER_RESULT, FujiProtocol.le16(FileTransfer.RESULT_CANCEL)) }
+            gatt.awaitValue(FujiGatt.FILE_TRANSACTION_STATE, 3_000)
+            if (attempt == 2) {
+                throw if (answer == null) {
+                    NoAnswerException("The camera didn't answer the $what request.")
+                } else {
+                    CameraBusyException("The camera is busy. Leave its menus or playback and try again.")
+                }
+            }
+            delay(700)
+        }
+    }
+
     /** One file download, as XApp's `fileTransfer`; see [FileTransfer]. */
     private suspend fun download(
         request: GattChar,
@@ -142,27 +193,18 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
         isBackup: Boolean,
         what: String,
         progress: (Int) -> Unit,
-    ): DownloadedFile {
-        gatt.subscribe(FujiGatt.FILE_TRANSACTION_STATE)
-        gatt.subscribe(requestState)
-        gatt.drain(FujiGatt.FILE_TRANSACTION_STATE)
-        gatt.drain(requestState)
-        var result = FileTransfer.RESULT_CANCEL
+    ): DownloadedFile = transferSession(requestState) {
+        requestTransfer(request, requestState, requestValue, what)
+        var result = FileTransfer.RESULT_FAIL
         try {
-            gatt.write(request, FujiProtocol.le16(requestValue))
-            val ready = gatt.awaitValue(requestState, 10_000)
-                ?: throw CameraBusyException("The camera didn't answer the $what request. Leave its menus or playback and try again.")
-            if (FileTransfer.stateCode(ready) != FileTransfer.READY) {
-                throw CameraBusyException("The camera is busy. Leave its menus or playback and try again.")
-            }
-            result = FileTransfer.RESULT_FAIL
             gatt.write(FujiGatt.FILE_PARTIAL_SIZE, FujiProtocol.le32(FileTransfer.PARTIAL_SIZE.toLong()))
             gatt.write(FujiGatt.FILE_TRANSFER_INDEX, FujiProtocol.le32(0))
 
             val assembler = FileAssembler()
-            while (true) {
+            var file: DownloadedFile? = null
+            while (file == null) {
                 val state = gatt.awaitValue(FujiGatt.FILE_TRANSACTION_STATE, 20_000)
-                    ?: throw FileTransferException("The camera stopped sending the $what.")
+                    ?: throw NoAnswerException("The camera stopped sending the $what.")
                 when (val code = FileTransfer.stateCode(state)) {
                     FileTransfer.STATE_START, FileTransfer.STATE_TRANSFERRING -> {
                         assembler.add(FileTransfer.parseChunk(gatt.read(FujiGatt.FILE_PARTIAL_DATA)))
@@ -179,20 +221,23 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
                         result = -1
                         if (isBackup) gatt.write(FujiGatt.FILE_TRANSFER_RESULT, FujiProtocol.le16(FileTransfer.RESULT_FINISH))
                         gatt.write(FujiGatt.FILE_TRANSFER_RESULT, FujiProtocol.le16(FileTransfer.RESULT_SUCCESS))
-                        // The camera then closes the transfer (state 4); give it a moment before the next operation.
+                        // The camera then closes the file (state 4) before the notifications go off.
                         gatt.awaitValue(FujiGatt.FILE_TRANSACTION_STATE, 3_000)
                         log("$what received: ${info?.name ?: "?"}, ${data.size} bytes")
-                        return DownloadedFile(info?.name?.ifBlank { null } ?: FileTransfer.BACKUP_FILE_NAME, data)
+                        file = DownloadedFile(info?.name?.ifBlank { null } ?: FileTransfer.BACKUP_FILE_NAME, data)
                     }
                     FileTransfer.STATE_TRANSFER_FINISHED -> throw FileTransferException("The camera ended the transfer.")
                     FileTransfer.STATE_ERROR -> throw FileTransferException("The camera reported a transfer error.")
                     else -> throw FileTransferException("The camera ended the transfer (state $code).")
                 }
             }
+            checkNotNull(file)
         } catch (e: Throwable) {
             // Tell the camera to drop the transfer so it leaves its "sending" state.
             if (result >= 0 && !gatt.disconnected.value) {
-                runCatching { gatt.write(FujiGatt.FILE_TRANSFER_RESULT, FujiProtocol.le16(result)) }
+                withContext(NonCancellable) {
+                    runCatching { gatt.write(FujiGatt.FILE_TRANSFER_RESULT, FujiProtocol.le16(result)) }
+                }
             }
             throw e
         }
@@ -208,59 +253,59 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
     suspend fun restore(data: ByteArray, progress: (Int, Int) -> Unit) {
         if (!capabilities.restore) throw UnsupportedCameraException("This camera doesn't accept a restore over Bluetooth.")
         val chunks = FileTransfer.restoreChunks(data)
-        gatt.subscribe(FujiGatt.FILE_TRANSACTION_STATE)
-        gatt.subscribe(FujiGatt.RESTORE_STATE)
-        gatt.drain(FujiGatt.FILE_TRANSACTION_STATE)
-        gatt.drain(FujiGatt.RESTORE_STATE)
-        var result = FileTransfer.RESULT_CANCEL
-        try {
-            gatt.write(FujiGatt.RESTORE_REQUEST, FujiProtocol.le16(FileTransfer.REQUEST_SETTINGS))
-            val ready = gatt.awaitValue(FujiGatt.RESTORE_STATE, 10_000)
-            if (ready == null || FileTransfer.stateCode(ready) != FileTransfer.READY) {
-                throw CameraBusyException("The camera isn't ready to restore. Leave its menus or playback and try again.")
-            }
-            gatt.write(FujiGatt.FILE_PARTIAL_SIZE, FujiProtocol.le32(FileTransfer.PARTIAL_SIZE.toLong()))
-            gatt.write(FujiGatt.FILE_TRANSFER_INDEX, FujiProtocol.le32(0))
-            gatt.drain(FujiGatt.FILE_TRANSACTION_STATE)
-            gatt.write(FujiGatt.FILE_INFORMATION, FileTransfer.encodeFileInfo(FileTransfer.BACKUP_FILE_NAME, data.size.toLong()))
-            val start = gatt.awaitValue(FujiGatt.FILE_TRANSACTION_STATE, 10_000)
-                ?: throw FileTransferException("The camera didn't start the restore.")
-            if (FileTransfer.stateCode(start) != FileTransfer.STATE_START) {
-                throw FileTransferException("The camera refused the restore (state ${FileTransfer.stateCode(start)}).")
-            }
-
-            for ((i, chunk) in chunks.withIndex()) {
-                gatt.write(FujiGatt.FILE_PARTIAL_DATA, chunk)
-                progress(minOf(data.size, (i + 1) * FileTransfer.PARTIAL_SIZE), data.size)
-                val state = gatt.awaitValue(FujiGatt.FILE_TRANSACTION_STATE, 10_000)
-                    ?: throw FileTransferException("The camera stopped answering during the restore.")
-                when (val code = FileTransfer.stateCode(state)) {
-                    FileTransfer.STATE_TRANSFERRING -> continue
-                    FileTransfer.STATE_FILE_FINISHED -> {
-                        result = -1
-                        // The camera has the whole file. It may restart to apply it, so a failed
-                        // final write doesn't make the restore fail.
-                        runCatching {
-                            gatt.write(FujiGatt.FILE_TRANSFER_RESULT, FujiProtocol.le16(FileTransfer.RESULT_FINISH))
-                        }
-                        log("restore accepted after ${i + 1} of ${chunks.size} chunks")
-                        return
-                    }
-                    FileTransfer.STATE_ERROR -> {
-                        result = FileTransfer.RESULT_FAIL
-                        throw FileTransferException("The camera rejected the backup. Is it from the same camera model?")
-                    }
-                    else -> throw FileTransferException("The camera ended the restore (state $code).")
+        transferSession(FujiGatt.RESTORE_STATE) {
+            requestTransfer(FujiGatt.RESTORE_REQUEST, FujiGatt.RESTORE_STATE, FileTransfer.REQUEST_SETTINGS, "restore")
+            var result = FileTransfer.RESULT_CANCEL
+            try {
+                gatt.write(FujiGatt.FILE_PARTIAL_SIZE, FujiProtocol.le32(FileTransfer.PARTIAL_SIZE.toLong()))
+                gatt.write(FujiGatt.FILE_TRANSFER_INDEX, FujiProtocol.le32(0))
+                gatt.drain(FujiGatt.FILE_TRANSACTION_STATE)
+                gatt.write(FujiGatt.FILE_INFORMATION, FileTransfer.encodeFileInfo(FileTransfer.BACKUP_FILE_NAME, data.size.toLong()))
+                val start = gatt.awaitValue(FujiGatt.FILE_TRANSACTION_STATE, 10_000)
+                    ?: throw NoAnswerException("The camera didn't start the restore.")
+                if (FileTransfer.stateCode(start) != FileTransfer.STATE_START) {
+                    throw FileTransferException("The camera refused the restore (state ${FileTransfer.stateCode(start)}).")
                 }
+
+                var finished = false
+                for ((i, chunk) in chunks.withIndex()) {
+                    gatt.write(FujiGatt.FILE_PARTIAL_DATA, chunk)
+                    progress(minOf(data.size, (i + 1) * FileTransfer.PARTIAL_SIZE), data.size)
+                    val state = gatt.awaitValue(FujiGatt.FILE_TRANSACTION_STATE, 10_000)
+                        ?: throw NoAnswerException("The camera stopped answering during the restore.")
+                    when (val code = FileTransfer.stateCode(state)) {
+                        FileTransfer.STATE_TRANSFERRING -> continue
+                        FileTransfer.STATE_FILE_FINISHED -> {
+                            result = -1
+                            // The camera has the whole file. It may restart to apply it, so a failed
+                            // final write doesn't make the restore fail.
+                            runCatching {
+                                gatt.write(FujiGatt.FILE_TRANSFER_RESULT, FujiProtocol.le16(FileTransfer.RESULT_FINISH))
+                            }
+                            log("restore accepted after ${i + 1} of ${chunks.size} chunks")
+                            finished = true
+                        }
+                        FileTransfer.STATE_ERROR -> {
+                            result = FileTransfer.RESULT_FAIL
+                            throw FileTransferException("The camera rejected the backup. Is it from the same camera model?")
+                        }
+                        else -> throw FileTransferException("The camera ended the restore (state $code).")
+                    }
+                    if (finished) break
+                }
+                if (!finished) {
+                    // Every chunk was acknowledged with "transferring": XApp treats this as done too.
+                    result = -1
+                    log("restore: all ${chunks.size} chunks sent")
+                }
+            } catch (e: Throwable) {
+                if (result >= 0 && !gatt.disconnected.value) {
+                    withContext(NonCancellable) {
+                        runCatching { gatt.write(FujiGatt.FILE_TRANSFER_RESULT, FujiProtocol.le16(result)) }
+                    }
+                }
+                throw e
             }
-            // Every chunk was acknowledged with "transferring": XApp treats this as done too.
-            result = -1
-            log("restore: all ${chunks.size} chunks sent")
-        } catch (e: Throwable) {
-            if (result >= 0 && !gatt.disconnected.value) {
-                runCatching { gatt.write(FujiGatt.FILE_TRANSFER_RESULT, FujiProtocol.le16(result)) }
-            }
-            throw e
         }
     }
 

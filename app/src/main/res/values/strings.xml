@@ -36,6 +36,7 @@
     <string name="vitals_failed">Couldn\'t read the counters: %1$s</string>
     <string name="vitals_unsupported">This camera doesn\'t share its shutter count over Bluetooth.</string>
     <string name="vitals_read">Read shutter count</string>
+    <string name="shots_taken">shots taken</string>
 
     <!-- Backups -->
     <string name="backups_intro">A backup is the camera\'s own settings file. It holds every setting, including your C1–C7 custom settings with your film-simulation recipes. Restoring puts all of them back, onto the same camera model.</string>

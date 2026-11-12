@@ -33,10 +33,7 @@ class CameraInfoActivity : AppCompatActivity() {
         binding = ActivityInfoBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.refreshButton.setOnClickListener {
-            session.refreshInfo()
-            session.fetchVitals()
-        }
+        binding.refreshButton.setOnClickListener { session.refreshAll() }
         binding.vitalsButton.setOnClickListener { session.fetchVitals() }
 
         // Read the counters once when the screen opens, as XApp's equipment status does.
@@ -64,8 +61,9 @@ class CameraInfoActivity : AppCompatActivity() {
         binding.vitalsRows.removeAllViews()
 
         val loaded = (vitals as? VitalsState.Loaded)?.vitals
-        val headline = loaded?.mechanicalShutter ?: loaded?.totalShots
+        val headline = loaded?.totalShots
         binding.shutterHeadline.visibility = if (headline != null) View.VISIBLE else View.GONE
+        binding.shutterCaption.visibility = binding.shutterHeadline.visibility
         binding.shutterHeadline.text = headline?.let { String.format(Locale.getDefault(), "%,d", it) }
 
         val status = when {
