@@ -28,8 +28,8 @@ import androidx.core.graphics.createBitmap
  * Layout follows medium-format camera software: generous margins, a restrained monochrome page,
  * large numerals for the readings that matter, small capital labels and hairline rules.
  *
- * Type is Carbon+ like Worldly: drop `carbonplus.otf` and `carbonplus-Bold.otf` into
- * `app/src/main/assets/fonts/` and they're used; without them the system sans-serif stands in.
+ * Type is Carbon+, as in Worldly, SAB Monitor and the Deco launcher (`assets/fonts/`). If a file
+ * can't be loaded, the system sans-serif stands in.
  */
 object Deco {
     // surfaces (darkest to lightest)

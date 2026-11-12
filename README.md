@@ -43,13 +43,9 @@ the phone's GPS and network location while a camera is connected, and answers ea
 
 The app uses the Deco "light in fog" design language from Worldly and the Deco launcher: a night
 stage, glass panels with hairline edges, one amber key light ("lit" means on), and spaced bold
-capital labels. The layout borrows the restraint of medium-format camera software: generous
-margins, big numerals for the readings that matter, small labels and hairline rules.
-
-Worldly's typeface (Carbon+) isn't bundled here, because it comes with its own license. To get it,
-copy `carbonplus.otf` and `carbonplus-Bold.otf` from Worldly's `app/src/main/assets/fonts/` into
-this app's `app/src/main/assets/fonts/`. The app picks them up automatically; without them it uses
-the system sans-serif.
+capital labels, set in **Carbon+** like Worldly, SAB Monitor and the Deco launcher
+(`app/src/main/assets/fonts/`). The layout borrows the restraint of medium-format camera software:
+generous margins, big numerals for the readings that matter, small labels and hairline rules.
 
 ---
 

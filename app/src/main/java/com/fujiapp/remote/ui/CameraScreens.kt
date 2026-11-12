@@ -103,7 +103,7 @@ class ConnectScreen(private val a: MainActivity) {
             addView(Kit.text(c, title, 16f, Deco.TEXT, bold = true))
             addView(Kit.text(c, subtitle, 13f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 6)))
         }, Kit.lp(0, weight = 1f))
-        addView(Kit.text(c, "›", 22f, Deco.DIM))
+        addView(Kit.text(c, ">", 18f, Deco.DIM)) // Carbon+ has no ›
         isClickable = true
         setOnClickListener { onClick() }
         layoutParams = Kit.lp(bottom = Deco.dpi(c, 10))
