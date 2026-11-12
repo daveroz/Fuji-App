@@ -1,11 +1,14 @@
 # Fuji Remote
 
-An open-source Android companion for Fujifilm cameras that works over **Bluetooth LE only**. It's
-built for the **X100VI** (firmware 1.30 and later, with Fujifilm's "secure" Bluetooth pairing).
-It covers what Fujifilm's XApp does over Bluetooth, without the clutter:
+An open-source Android companion for Fujifilm cameras. It's built for the **X100VI** (firmware
+1.30 and later, with Fujifilm's "secure" Bluetooth pairing). Everyday use is **Bluetooth LE**, and it
+covers what Fujifilm's XApp does over Bluetooth, without the clutter. Loading recipes into the
+camera's custom slots uses a **USB-C cable**, the only way the camera accepts them one slot at a time.
 
 - **Camera**: live status of everything the camera reports, plus a remote shutter release
-- **Recipes**: the C1–C7 custom settings on the camera, by name
+- **Recipes**: the C1–C7 custom settings on the camera; a library of 30 recipes after film stocks
+  and films; a **Lab** to try settings on a picture; and loading any recipe into a slot (over USB,
+  after a backup)
 - **Equipment**: shutter count and every usage counter the camera keeps
 - **Backups**: back up the camera's settings (your **C1–C7 recipes** included) and restore them
 - **Settings**: clock sync, optional location sync (geotagging), the camera's Bluetooth settings,
@@ -21,7 +24,7 @@ or redistributed.**
 | Tab | What's on it |
 |---|---|
 | **Camera** | Before connecting: find and pair a camera, or reconnect to a paired one. Connected: a readout strip (shots, power, Wi-Fi, firmware), the **remote release** (hold to focus, let go to shoot), and every value the camera reports, decoded and kept live. **State:** power switch, Wi-Fi access point, pictures waiting, why it's busy, card, firmware update. **Camera:** model, name, serial, firmware, model code. **Connection:** paired phones, connect while off, location sync and interval, transfer settings, activity log. **Lens**, and **Technical** details. |
-| **Recipes** | Your C1–C7 custom settings, read from the camera's settings file when you open the tab (about 2 seconds). Offline, the newest backup stands in. The file read for the recipes can be kept as a backup without downloading it again. |
+| **Recipes** | Three sections. **Camera**: the C1–C7 names, read over Bluetooth from the camera's settings file when you open it (about 2 seconds; offline, the newest backup stands in), and, over USB, every setting of every slot. **Library**: 30 recipes after popular film stocks (Portra, Ektar, Gold, Kodachrome, Superia, Pro 400H, Velvia, CineStill, Tri-X, HP5…) and films (Blade Runner 2049, Skyfall, The Matrix, Fury Road, Drive, Amélie, In the Mood for Love, Dune…), each with what the look is, how the settings get there, and how to shoot it. **Lab**: every setting on sliders over a sample picture or one of your photos, with a live preview; save the result to My recipes. Any recipe can be loaded into a slot. |
 | **Equipment** | Total shots, shutter actuations against the rated shutter life, and all of the camera's usage counters: power-ons, operating, shooting and viewfinder time, viewfinder switches, flash, half-presses, OK and command-dial use, sensor cleanings, heat warnings and shutdowns, time spent with the sensor hot, battery, USB and lens counts, and the camera's error log. |
 | **Backups** | Back up the camera's settings file, restore it to the same model, share it, delete it. |
 | **Settings** | **Set the camera clock** (on by default, as XApp does). The camera's **Location sync** (see below), **location interval** and **Connect while power off** settings, written straight to the camera. **Log**: save, share, clear. |
@@ -31,6 +34,34 @@ The **LOG** button at the top of every screen saves the app's recording as a `.t
 survives restarts and crashes. It holds every Bluetooth exchange, what the app did, every error,
 and the app, Android and phone versions. It holds no locations or passwords. If something looks
 off, save it and send it.
+
+### Loading a recipe into a slot
+
+Pick a recipe (in the Library, the Lab or My recipes), tap **Load** and choose C1–C7. The app then
+**always asks to back up first**: with the camera connected by Bluetooth it takes a normal backup;
+otherwise it downloads the backup over USB right before writing. Either lands in **Backups** and
+restores every setting, all seven slots included. You can also choose to load without one.
+
+Then connect the camera to the phone with a **USB-C cable**, with the camera's USB connection mode
+set to **USB RAW CONV./BACKUP RESTORE** (in its network/USB settings). While it's connected this way
+the camera's menus are off. The app reads the slot first (kept for **Undo**), writes only the
+settings that change, in the order the camera needs, writes the name, and reads everything back.
+The report says what was written and what the camera refused and why. The usual one: **DR200 and
+DR400 need ISO 250 / 500 or higher in that slot** (set the slot's ISO to Auto). **Undo** puts the
+slot back as it was.
+
+What's possible, and how:
+
+| | Bluetooth | USB-C cable |
+|--|--|--|
+| Read the slot names | yes, from the settings file (no backup is saved unless you ask) | yes |
+| Read every setting of a slot | in the settings file, but its layout isn't mapped yet | **yes**, one setting at a time |
+| Change one slot, or load a recipe into a chosen slot | only by editing the settings file and restoring it, which needs that layout and a test on the camera | **yes**, documented and reported working on an X100VI |
+| See a recipe on a picture | the Lab (an approximation on the phone) | the camera can also develop a RAW with a recipe over USB; not built yet |
+
+> Fujifilm says that using any program it hasn't licensed to connect to or control a camera voids
+> the camera's limited warranty ([Fuji X Weekly, 2026-06-08](https://fujixweekly.com/2026/06/08/your-cameras-warranty-might-be-voided/)).
+> That covers this app, XApp alternatives and every recipe uploader. Laws differ by country.
 
 ### Location sync
 
@@ -122,6 +153,15 @@ every write is a write with response. Every UUID, with its source, is in
 - **Restore**: `RESTORE_REQUEST = 1` → `RESTORE_STATE = 1` → chunk size 120, index 0,
   `FILE_INFORMATION` (`"backup.dat"` padded to 40 bytes + `u32 size`) → state 1 → write each chunk
   and wait for state 2 → state 3 means the camera has it all; write `FILE_TRANSFER_RESULT = 3`.
+- **Custom setting slots over USB** (PTP, camera in USB RAW CONV./BACKUP RESTORE, vendor `0x04CB`):
+  `0xD18C` selects the slot, `0xD18D` is its name (a PTP string, up to 25 characters) and
+  `0xD18E`–`0xD1A4` its settings (16-bit; tones, color, sharpness and clarity signed ×10; NR a lookup;
+  grain Off written as `1`, read back as `6`/`7`; DR Auto `0xFFFF`). Writes go D-Range Priority off
+  before Dynamic Range, film simulation before toning, tones and color, Kelvin right after the white
+  balance mode and the shifts after it, the name last; then everything is read back and compared by
+  meaning. The backup over USB is `GetObjectInfo(0)` / `GetObject(0)`; it's stored compressed like a
+  Bluetooth backup. Facts from [`zgrimz/fujifilm-ptp-reference`](https://github.com/zgrimz/fujifilm-ptp-reference)
+  (CC BY 4.0), implemented independently.
 - **Recovery**: connecting retries up to 3 times, a dropped link reconnects on its own, and backups
   and shutter-count reads retry once on a fresh connection. A restore never retries on its own.
 
@@ -163,12 +203,16 @@ app/src/main/java/com/fujiapp/remote/
 │   └── Bonding.kt         System pairing (numeric comparison)
 ├── model/                 CameraSnapshot (all raw values, decoded), CameraInfo, CameraVitals, BackupMeta,
 │                          SettingsFile (the backup file: header and C1–C7 names, pure, tested)
+├── recipe/                Recipe (every slot setting), BankCodec (USB values and write order, tested),
+│                          RecipeLibrary (the 30 recipes), MyRecipes (saved from the Lab)
+├── usb/                   Ptp (containers, tested), UsbCamera (USB host PTP: slots, backup), RecipeTransfer
+├── preview/               RecipePreview (the Lab's approximate rendering), SampleScene (the sample picture)
 ├── data/BackupStore.kt    Backups in app storage (.dat as received + .json metadata)
 ├── util/                  AppLog (recorder), LogExporter (Downloads), AppSettings, PhoneLocation
 ├── CameraSession.kt       Scan → connect → pair → register → live status / features / transfers
 ├── App.kt                 Holds the session, starts the recorder, records crashes
 └── ui/                    Deco (design system), Kit (view builders), StageView (the hazy stage),
-                           MainActivity, one class per screen
+                           MainActivity, RecipeFlow (load into a slot), one class per screen
 ```
 
 ---
@@ -188,6 +232,13 @@ app/src/main/java/com/fujiapp/remote/
 - [`gkoh/furble`](https://github.com/gkoh/furble) and [`petabyt/libfuji`](https://github.com/petabyt/libfuji):
   the original Fujifilm BLE reverse-engineering
 - FUJIFILM Camera Remote 4.10.2: characteristic names and value formats for camera information
+- [`zgrimz/fujifilm-ptp-reference`](https://github.com/zgrimz/fujifilm-ptp-reference) (CC BY 4.0): the
+  USB custom-slot properties, their encodings, the write order and refusal rules, and the USB backup
+- [`p5k369/grawji`](https://github.com/p5k369/grawji): that older bodies' settings backups carry a
+  16-bit checksum the camera checks on restore (not found in the X100VI's; nothing copied)
+- The recipes are this app's own, written after studying each film stock's and film's color
+  (published analyses of the films' cinematography, film-stock comparisons); none is copied from a
+  published recipe
 
 ## License
 

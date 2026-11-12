@@ -678,6 +678,11 @@ class CameraSession(context: Context) {
         if (!started) _recipes.value = previous
     }
 
+    /** The slots changed over USB: what was read over Bluetooth is out of date. */
+    fun forgetRecipes() {
+        if (_recipes.value !is RecipesState.Loading) _recipes.value = RecipesState.Idle
+    }
+
     /** Keep the settings file read for the recipes as a backup, without downloading it again. */
     fun saveRecipesAsBackup(name: String): BackupMeta? {
         val loaded = _recipes.value as? RecipesState.Loaded ?: return null

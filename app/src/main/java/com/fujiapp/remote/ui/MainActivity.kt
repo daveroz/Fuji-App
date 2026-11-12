@@ -22,6 +22,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.graphics.scale
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -37,7 +38,7 @@ import com.fujiapp.remote.model.BackupMeta
 import com.fujiapp.remote.util.AppLog
 import com.fujiapp.remote.util.LogExporter
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.DateFormat
@@ -51,6 +52,9 @@ import java.util.Date
 class MainActivity : AppCompatActivity() {
 
     val session: CameraSession get() = App.of(application)
+    val transfer: com.fujiapp.remote.usb.RecipeTransfer get() = (application as App).transfer
+    val myRecipes: com.fujiapp.remote.recipe.MyRecipes get() = (application as App).myRecipes
+    val recipeFlow: RecipeFlow by lazy { RecipeFlow(this) }
 
     private enum class Tab(val title: String) {
         CAMERA("Camera"), RECIPES("Recipes"), EQUIPMENT("Equipment"), BACKUPS("Backups"), SETTINGS("Settings")
@@ -58,7 +62,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var connectScreen: ConnectScreen
     private lateinit var statusScreen: StatusScreen
-    private lateinit var recipesScreen: RecipesScreen
+    lateinit var recipesScreen: RecipesScreen
+        private set
     private lateinit var equipmentScreen: EquipmentScreen
     private lateinit var backupsScreen: BackupsScreen
     private lateinit var settingsScreen: SettingsScreen
@@ -102,6 +107,12 @@ class MainActivity : AppCompatActivity() {
             if (session.adapter?.isEnabled == true) action?.invoke() else showNotice("Turn Bluetooth on, then try again.")
         }
 
+    /** A picture for the Lab, from the phone's photos (no permission needed with the photo picker). */
+    private val pickPhoto =
+        registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+            if (uri != null) loadLabPhoto(uri)
+        }
+
     /** Saving the log on Android 9 and lower: the user picks where. */
     private val createLogFile =
         registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri: Uri? ->
@@ -129,7 +140,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
-                    combine(session.state, session.vitals, session.backup, session.restore, session.recipes) { _, _, _, _, _ -> }
+                    merge(session.state, session.vitals, session.backup, session.restore, session.recipes, transfer.state)
                         .collect { render() }
                 }
                 launch {
@@ -264,7 +275,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Draw the header and the current tab from the session's state. */
-    private fun render() {
+    fun render() {
         if (!::content.isInitialized) return
         val state = session.state.value
         val connected = state as? ConnState.Connected
@@ -381,6 +392,59 @@ class MainActivity : AppCompatActivity() {
         }
         action()
     }
+
+    // ---- recipes ----
+
+    fun showRecipes() = select(Tab.RECIPES)
+
+    fun refreshBackups() = backupsScreen.refreshList()
+
+    /** A list to pick one from; [checked] marks the current choice (−1 for none). */
+    fun choose(title: String, items: List<String>, checked: Int, onPick: (Int) -> Unit) {
+        val b = MaterialAlertDialogBuilder(this).setTitle(title).setNegativeButton("Cancel", null)
+        if (checked >= 0) {
+            b.setSingleChoiceItems(items.toTypedArray(), checked) { d, i -> d.dismiss(); onPick(i) }
+        } else {
+            b.setItems(items.toTypedArray()) { _, i -> onPick(i) }
+        }
+        b.show()
+    }
+
+    fun pickLabPhoto() {
+        AppLog.ui("lab: pick photo")
+        pickPhoto.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+
+    private fun loadLabPhoto(uri: Uri) {
+        lifecycleScope.launch {
+            val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { decodeScaled(uri, LabScreen.PHOTO_MAX) }
+            if (bitmap != null) recipesScreen.lab.usePhoto(bitmap) else showNotice("Couldn't open that picture.")
+        }
+    }
+
+    /** Decode a picture no larger than [max] pixels on its long side, as a bitmap whose pixels can be read. */
+    private fun decodeScaled(uri: Uri, max: Int): android.graphics.Bitmap? = runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(contentResolver, uri)) { d, info, _ ->
+                val w = info.size.width
+                val h = info.size.height
+                val scale = minOf(1f, max.toFloat() / maxOf(w, h))
+                d.setTargetSize(maxOf(1, (w * scale).toInt()), maxOf(1, (h * scale).toInt()))
+                d.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+            }
+        } else {
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= max) sample *= 2
+            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            val decoded = contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, opts) }
+            decoded?.let {
+                val scale = minOf(1f, max.toFloat() / maxOf(it.width, it.height))
+                if (scale < 1f) it.scale((it.width * scale).toInt(), (it.height * scale).toInt()) else it
+            }
+        }
+    }.onFailure { AppLog.error("lab photo", it) }.getOrNull()
 
     // ---- settings ----
 

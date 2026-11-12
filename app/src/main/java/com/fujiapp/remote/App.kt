@@ -1,11 +1,15 @@
 package com.fujiapp.remote
 
 import android.app.Application
+import com.fujiapp.remote.recipe.MyRecipes
+import com.fujiapp.remote.usb.RecipeTransfer
 import com.fujiapp.remote.util.AppLog
 
-/** Holds the process-wide [CameraSession] and starts the log recorder. */
+/** Holds the process-wide [CameraSession], the USB recipe transfers and saved recipes, and starts the log recorder. */
 class App : Application() {
     val session: CameraSession by lazy { CameraSession(this) }
+    val transfer: RecipeTransfer by lazy { RecipeTransfer(this, session.store) }
+    val myRecipes: MyRecipes by lazy { MyRecipes(this) }
 
     override fun onCreate() {
         super.onCreate()

@@ -7,6 +7,11 @@
         android:name="android.hardware.bluetooth_le"
         android:required="true" />
 
+    <!-- USB host: recipes are written to the custom setting slots over a USB-C cable. -->
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="false" />
+
     <!-- Android 12 and later: find and connect to the camera. Scanning is not used for location. -->
     <uses-permission
         android:name="android.permission.BLUETOOTH_SCAN"

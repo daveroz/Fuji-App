@@ -1,6 +1,7 @@
 package com.fujiapp.remote.ui
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.text.TextUtils
 import android.util.TypedValue
@@ -12,6 +13,8 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.google.android.material.progressindicator.LinearProgressIndicator
+import com.google.android.material.slider.LabelFormatter
+import com.google.android.material.slider.Slider
 import com.fujiapp.remote.model.CameraInfo
 
 /** Small view builders for the Deco look, so every screen is put together the same way. */
@@ -204,6 +207,87 @@ object Kit {
         fun enable(on: Boolean) {
             setEnabled(view, on)
             chips.forEach { it.isEnabled = on }
+        }
+    }
+
+    /** A setting on a scale: title and value above, an amber slider below. */
+    class SliderRow(
+        c: Context,
+        title: String,
+        from: Float,
+        to: Float,
+        step: Float,
+        private val format: (Float) -> String,
+        private val onChange: (Float) -> Unit,
+    ) {
+        private val valueText = label(c, "", Deco.AMBER_LIGHT, 11f)
+        private val slider = Slider(c).apply {
+            valueFrom = from
+            valueTo = to
+            stepSize = step
+            value = from.coerceAtLeast(0f).coerceAtMost(to)
+            labelBehavior = LabelFormatter.LABEL_GONE
+            isTickVisible = false
+            trackActiveTintList = ColorStateList.valueOf(Deco.AMBER)
+            trackInactiveTintList = ColorStateList.valueOf(Deco.BORDER_STRONG)
+            thumbTintList = ColorStateList.valueOf(Deco.AMBER_LIGHT)
+            haloTintList = ColorStateList.valueOf(Deco.KEY_GLASS_HI)
+            addOnChangeListener { _, v, fromUser ->
+                valueText.text = format(v)
+                if (fromUser) onChange(v)
+            }
+        }
+        val view: View = column(c).apply {
+            setPadding(0, Deco.dpi(c, 10), 0, Deco.dpi(c, 2))
+            addView(row(c).apply {
+                addView(text(c, title, 14f, Deco.TEXT_SOFT), lp(0, weight = 1f))
+                addView(valueText)
+            })
+            addView(slider, lp(top = Deco.dpi(c, 2)))
+        }
+
+        fun set(v: Float) {
+            // The slider refuses a value off its step grid (a slot can hold, say, 5250K on a 100K grid).
+            val from = slider.valueFrom
+            val step = slider.stepSize
+            val snapped = (from + Math.round((v - from) / step) * step).coerceIn(from, slider.valueTo)
+            if (slider.value != snapped) slider.value = snapped
+            valueText.text = format(snapped)
+        }
+
+        fun show(on: Boolean) {
+            view.visibility = if (on) View.VISIBLE else View.GONE
+        }
+    }
+
+    /** A setting picked from a list: title on the left, the choice on the right; tap to change. */
+    class PickerRow(c: Context, title: String, onClick: () -> Unit) {
+        private val valueText = text(c, "", 14f, Deco.TEXT).apply { gravity = Gravity.END }
+        val view: View = row(c).apply {
+            setPadding(0, Deco.dpi(c, 14), 0, Deco.dpi(c, 14))
+            addView(text(c, title, 14f, Deco.TEXT_SOFT), lp(0, weight = 1f))
+            addView(valueText, lp(Kit.WRAP))
+            addView(text(c, "  >", 14f, Deco.DIM))
+            isClickable = true
+            background = Deco.pressable(Deco.box(c, 0, 0, 12f), Deco.box(c, Deco.GLASS, 0, 12f))
+            setOnClickListener { onClick() }
+        }
+
+        fun set(value: String) {
+            valueText.text = value
+        }
+
+        fun show(on: Boolean) {
+            view.visibility = if (on) View.VISIBLE else View.GONE
+        }
+    }
+
+    /** A strip of color blocks: a recipe's palette at a glance. */
+    fun palette(c: Context, colors: List<Int>, heightDp: Int = 8): View = row(c).apply {
+        colors.forEachIndexed { i, color ->
+            addView(View(c).apply { background = Deco.box(c, color, 0, 3f) }, LinearLayout.LayoutParams(0, Deco.dpi(c, heightDp), 1f).apply {
+                if (i > 0) marginStart = Deco.dpi(c, 4)
+            })
         }
     }
 
