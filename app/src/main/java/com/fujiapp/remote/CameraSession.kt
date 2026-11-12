@@ -9,6 +9,7 @@ import androidx.core.content.edit
 import com.fujiapp.remote.ble.Bonding
 import com.fujiapp.remote.ble.CameraBusyException
 import com.fujiapp.remote.ble.CameraScanner
+import com.fujiapp.remote.ble.DownloadedFile
 import com.fujiapp.remote.ble.Capabilities
 import com.fujiapp.remote.ble.FileTransferException
 import com.fujiapp.remote.ble.FoundCamera
@@ -24,6 +25,7 @@ import com.fujiapp.remote.model.BackupMeta
 import com.fujiapp.remote.model.CameraInfo
 import com.fujiapp.remote.model.CameraSnapshot
 import com.fujiapp.remote.model.CameraVitals
+import com.fujiapp.remote.model.SettingsFile
 import com.fujiapp.remote.util.AppLog
 import com.fujiapp.remote.util.AppSettings
 import com.fujiapp.remote.util.PhoneLocation
@@ -86,6 +88,14 @@ sealed interface VitalsState {
     data class Failed(val message: String) : VitalsState
 }
 
+/** The custom settings (C1–C7) read from the camera's settings file. */
+sealed interface RecipesState {
+    data object Idle : RecipesState
+    data object Loading : RecipesState
+    data class Loaded(val file: SettingsFile, val download: DownloadedFile, val readAt: Long) : RecipesState
+    data class Failed(val message: String) : RecipesState
+}
+
 /** Pairing didn't complete; retrying on our own won't help. */
 private class PairingFailedException(message: String) : IOException(message)
 
@@ -122,6 +132,9 @@ class CameraSession(context: Context) {
     private val _vitals = MutableStateFlow<VitalsState>(VitalsState.Idle)
     val vitals: StateFlow<VitalsState> = _vitals.asStateFlow()
 
+    private val _recipes = MutableStateFlow<RecipesState>(RecipesState.Idle)
+    val recipes: StateFlow<RecipesState> = _recipes.asStateFlow()
+
     /** Short messages for the user (a setting written, a shot taken, a time sync). */
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice.asStateFlow()
@@ -136,6 +149,8 @@ class CameraSession(context: Context) {
     private var gatt: GattClient? = null
     private var camera: FujiCamera? = null
     private var userDisconnected = false
+    /** The camera asked for the location without permission to answer: told the user once per connection. */
+    private var toldAboutLocation = false
 
     val adapter: BluetoothAdapter?
         get() = app.getSystemService(BluetoothManager::class.java)?.adapter
@@ -235,6 +250,7 @@ class CameraSession(context: Context) {
         cleanup()
         userDisconnected = false
         _vitals.value = VitalsState.Idle
+        _recipes.value = RecipesState.Idle
         connectJob = scope.launch { connectLoop(device, waitForCamera) }
     }
 
@@ -325,9 +341,8 @@ class CameraSession(context: Context) {
 
         val cam = FujiCamera(client) { AppLog.add(it) }
         val stored = if (preferCameraValue) null else storedId(device)
-        val listenForLocation = settings.locationSync && location.hasPermission()
         val id = try {
-            cam.register(stored, freshPairing, listenForLocation) { _state.value = ConnState.Connecting(PAIRING_MESSAGE) }
+            cam.register(stored, freshPairing) { _state.value = ConnState.Connecting(PAIRING_MESSAGE) }
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
             throw RegistrationRejected(usedStored = stored != null && !freshPairing, cause = t)
@@ -337,8 +352,19 @@ class CameraSession(context: Context) {
         remember(device, snapshot.info.model, id)
         _state.value = ConnState.Connected(snapshot, cam.capabilities, cam.hasShutter)
         AppLog.add("connected: ${snapshot.info.displayName} fw ${snapshot.info.firmware}")
+        toldAboutLocation = false
         startMonitor(client, cam)
-        if (listenForLocation) location.start()
+        updateLocationListening()
+        // The shutter count is the first thing people look for: read it once per connection.
+        if (cam.capabilities.vitals && _vitals.value !is VitalsState.Loaded) {
+            scope.launch {
+                delay(AUTO_READ_DELAY_MS)
+                // Let an operation the user started first finish.
+                withTimeoutOrNull(AUTO_READ_WAIT_MS) { while (opLock.isLocked) delay(250) }
+                val v = _vitals.value
+                if (camera === cam && v !is VitalsState.Loaded && v !is VitalsState.Loading) fetchVitals(user = false)
+            }
+        }
         return stored != null && !freshPairing
     }
 
@@ -356,16 +382,30 @@ class CameraSession(context: Context) {
                             if (t !is CancellationException) AppLog.add("time sync failed: $t")
                         }
                     }
-                    FujiGatt.LOCATION_SYNC_STATE.uuid -> if (FujiProtocol.u16(value) == 1 && settings.locationSync) launch {
+                    FujiGatt.LOCATION_SYNC_STATE.uuid -> if (FujiProtocol.u16(value) == 1) launch {
                         answerLocationRequest(cam)
                     }
                 }
                 FujiGatt.READABLE.firstOrNull { it.uuid == uuid }?.let { c -> updateSnapshot { it.with(c, value) } }
+                if (uuid == FujiGatt.LOCATION_SYNC_SETTING.uuid) updateLocationListening()
             }
         }
     }
 
+    /**
+     * Answer the camera's location request. The camera only asks while its location sync is on,
+     * and requests left unanswered during a transfer made it drop the link, so answer every one.
+     */
     private suspend fun answerLocationRequest(cam: FujiCamera) {
+        if (!location.hasPermission()) {
+            AppLog.add("location request: no location permission")
+            if (!toldAboutLocation) {
+                toldAboutLocation = true
+                notify("The camera is asking for your location to geotag pictures. Turn on Location sync in Settings, or turn it off there to stop the requests.")
+            }
+            return
+        }
+        location.start()
         val fix = location.current()
         if (fix == null) {
             AppLog.add("location request: no recent fix yet")
@@ -386,6 +426,12 @@ class CameraSession(context: Context) {
         }
     }
 
+    /** Listen to the phone's location while the camera may ask for it (its location sync is on). */
+    private fun updateLocationListening() {
+        val on = (_state.value as? ConnState.Connected)?.snapshot?.locationSyncOn == true && location.hasPermission()
+        if (on) location.start() else location.stop()
+    }
+
     private fun updateSnapshot(change: (CameraSnapshot) -> CameraSnapshot) {
         val s = _state.value as? ConnState.Connected ?: return
         _state.value = s.copy(snapshot = change(s.snapshot))
@@ -398,6 +444,7 @@ class CameraSession(context: Context) {
         transferJob?.cancel()
         cleanup()
         _vitals.value = VitalsState.Idle
+        _recipes.value = RecipesState.Idle
         _state.value = ConnState.Idle
     }
 
@@ -448,17 +495,15 @@ class CameraSession(context: Context) {
         AppLog.ui("setting: sync time = $on")
     }
 
-    /** Turn location sync on or off. The caller has asked for the location permission. */
-    fun setLocationSync(on: Boolean) {
-        settings.locationSync = on
-        AppLog.ui("setting: location sync = $on")
-        val cam = camera ?: return
-        scope.launch {
-            runCatching { cam.setLocationRequests(on && location.hasPermission()) }
-                .onFailure { AppLog.add("location requests ${if (on) "on" else "off"} failed: $it") }
+    /**
+     * Location sync is the camera's own setting: while it's on, the camera asks for the phone's
+     * location every few seconds and the app answers. The caller has asked for the location
+     * permission before turning it on.
+     */
+    fun setLocationSync(on: Boolean) =
+        writeSetting("location sync ${if (on) "on" else "off"}", FujiGatt.LOCATION_SYNC_SETTING) {
+            it.setLocationSyncSetting(on)
         }
-        if (on) location.start() else location.stop()
-    }
 
     // ---- camera operations ----
 
@@ -490,6 +535,7 @@ class CameraSession(context: Context) {
                 try {
                     write(cam)
                     cam.read(readBack)?.let { v -> updateSnapshot { it.with(readBack, v) } }
+                    updateLocationListening()
                     notify("Camera updated: $what")
                 } catch (c: CancellationException) {
                     throw c
@@ -500,9 +546,6 @@ class CameraSession(context: Context) {
             }
         }
     }
-
-    fun setCameraLocationSync(on: Boolean) =
-        writeSetting("location sync ${if (on) "on" else "off"}", FujiGatt.LOCATION_SYNC_SETTING) { it.setLocationSyncSetting(on) }
 
     fun setCameraLocationInterval(seconds: Int) =
         writeSetting("location interval $seconds s", FujiGatt.LOCATION_SYNC_CYCLE) { it.setLocationSyncInterval(seconds) }
@@ -553,6 +596,7 @@ class CameraSession(context: Context) {
             val result = try {
                 val cam = camera ?: throw GattException("Not connected.")
                 try {
+                    awaitReady()
                     Result.success(op(cam))
                 } catch (c: CancellationException) {
                     throw c
@@ -562,6 +606,7 @@ class CameraSession(context: Context) {
                     // If this connection is still up, drop it; if it already dropped, connectLoop is on it.
                     if (camera === cam) forceReconnect()
                     val fresh = awaitNewConnection(cam) ?: throw t
+                    awaitReady()
                     Result.success(op(fresh))
                 }
             } catch (c: CancellationException) {
@@ -574,8 +619,21 @@ class CameraSession(context: Context) {
         return true
     }
 
+    /**
+     * The camera reports its power switch once it has finished its side of the connection; until
+     * then it ignores transfer requests. Wait a few seconds for that, then go ahead regardless.
+     */
+    private suspend fun awaitReady() {
+        fun ready() = (_state.value as? ConnState.Connected)?.snapshot?.info?.power != null
+        if (ready()) return
+        AppLog.add("waiting for the camera to finish connecting")
+        val ok = withTimeoutOrNull(READY_TIMEOUT_MS) { state.first { ready() } } != null
+        if (!ok) AppLog.add("the camera didn't report its power switch; trying anyway")
+    }
+
     /** Read the shutter count and usage data. */
-    fun fetchVitals() {
+    fun fetchVitals(user: Boolean = true) {
+        if (user) AppLog.ui("read counters")
         val previous = _vitals.value
         if (previous is VitalsState.Loading) return
         // Set before starting: the operation may finish (fail) before operation() returns.
@@ -591,6 +649,41 @@ class CameraSession(context: Context) {
             }
         }
         if (!started) _vitals.value = previous
+    }
+
+    /** Read the C1–C7 custom settings from the camera's settings file (a backup download, kept in memory). */
+    fun readRecipes(user: Boolean = true) {
+        if (user) AppLog.ui("read recipes")
+        val previous = _recipes.value
+        if (previous is RecipesState.Loading) return
+        _recipes.value = RecipesState.Loading
+        val started = operation(
+            retryOnFreshConnection = true,
+            op = { cam ->
+                val file = cam.downloadBackup { }
+                val parsed = withContext(Dispatchers.Default) { SettingsFile.parse(file.data) }
+                    ?: throw FileTransferException("The camera's settings file couldn't be read.")
+                parsed to file
+            },
+        ) { result ->
+            result.onSuccess { (parsed, file) ->
+                AppLog.add("recipes: ${parsed.customSlots.joinToString { "${it.label} ${it.name}" }}")
+                _recipes.value = RecipesState.Loaded(parsed, file, System.currentTimeMillis())
+            }
+            result.onFailure {
+                AppLog.add("recipes failed: $it")
+                _recipes.value = RecipesState.Failed(friendly(it))
+            }
+        }
+        if (!started) _recipes.value = previous
+    }
+
+    /** Keep the settings file read for the recipes as a backup, without downloading it again. */
+    fun saveRecipesAsBackup(name: String): BackupMeta? {
+        val loaded = _recipes.value as? RecipesState.Loaded ?: return null
+        AppLog.ui("recipes saved as backup \"$name\"")
+        val info = (state.value as? ConnState.Connected)?.info ?: CameraInfo(model = loaded.file.model)
+        return store.save(name, info, loaded.download).also { notify("Saved \"${it.name}\" to Backups.") }
     }
 
     /** Start a backup; false if another operation is running. */
@@ -699,5 +792,8 @@ class CameraSession(context: Context) {
         const val MAX_ATTEMPTS = 3
         const val RETRY_DELAY_MS = 1_500L
         const val PAIRING_MESSAGE = "Pairing: confirm the code on the camera (MENU/OK) and on this phone."
+        const val AUTO_READ_DELAY_MS = 1_500L
+        const val READY_TIMEOUT_MS = 5_000L
+        const val AUTO_READ_WAIT_MS = 60_000L
     }
 }

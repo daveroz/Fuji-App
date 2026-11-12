@@ -217,15 +217,16 @@ object FujiGatt {
     )
 
     /**
-     * Subscriptions made during registration, in the order GeoShutter found the X100VI accepts:
-     * the two indications first, then notifications. A missing one is logged and skipped.
+     * Subscriptions made during registration, in the order XApp and GeoShutter use: the two
+     * indications first, then notifications. A missing one is logged and skipped.
      *
-     * LOCATION_SYNC_STATE (the camera's location request) is left out unless location sync is on:
-     * in two field logs from an X100VI, every transfer the camera dropped came 1–2 s after a
-     * location request that went unanswered.
+     * All of them are needed, LOCATION_SYNC_STATE included. In a field log from an X100VI 1.31
+     * without it, the camera reported its power switch as 0, never asked for the time, and left
+     * every shutter-count request unanswered; the moment it was subscribed, the power switch
+     * turned to "on" and the camera asked for the time and the location.
      */
     val REGISTRATION_SUBSCRIPTIONS: List<GattChar> = listOf(
-        AP_STATE, TRANSFER_STATE, DATE_SYNC_STATE, CAMERA_NAME, LOGGING_SETTING,
+        AP_STATE, TRANSFER_STATE, DATE_SYNC_STATE, LOCATION_SYNC_STATE, CAMERA_NAME, LOGGING_SETTING,
     )
 
     /** Optional subscriptions that keep the status screen live. Failures are skipped. */

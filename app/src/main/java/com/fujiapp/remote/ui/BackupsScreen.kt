@@ -106,6 +106,13 @@ class BackupsScreen(private val a: MainActivity) {
                     Kit.lp(top = Deco.dpi(c, 8)),
                 )
                 addView(Kit.text(c, dates.format(Date(meta.savedAt)), 13f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 6)))
+                val recipes = a.session.store.settings(meta)?.customSlots.orEmpty().filter { it.name.isNotBlank() }
+                if (recipes.isNotEmpty()) {
+                    addView(
+                        Kit.text(c, recipes.joinToString("  ·  ") { "${it.label} ${it.name}" }, 13f, Deco.TEXT_SOFT),
+                        Kit.lp(top = Deco.dpi(c, 10)),
+                    )
+                }
                 addView(Kit.row(c).apply {
                     val restore = Kit.button(c, "Restore", Kit.Style.SECONDARY) { a.confirmRestore(meta) }
                     Kit.setEnabled(restore, restoreAllowed)

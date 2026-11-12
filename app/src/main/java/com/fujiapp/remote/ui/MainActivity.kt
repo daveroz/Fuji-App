@@ -45,17 +45,20 @@ import java.util.Date
 
 /**
  * The one screen of the app: a header with the camera's name, live status and the LOG button;
- * four tabs (Camera, Equipment, Backups, Settings); and a notice bar for short messages.
+ * five tabs (Camera, Recipes, Equipment, Backups, Settings); and a notice bar for short messages.
  */
 @SuppressLint("MissingPermission")
 class MainActivity : AppCompatActivity() {
 
     val session: CameraSession get() = App.of(application)
 
-    private enum class Tab(val title: String) { CAMERA("Camera"), EQUIPMENT("Equipment"), BACKUPS("Backups"), SETTINGS("Settings") }
+    private enum class Tab(val title: String) {
+        CAMERA("Camera"), RECIPES("Recipes"), EQUIPMENT("Equipment"), BACKUPS("Backups"), SETTINGS("Settings")
+    }
 
     private lateinit var connectScreen: ConnectScreen
     private lateinit var statusScreen: StatusScreen
+    private lateinit var recipesScreen: RecipesScreen
     private lateinit var equipmentScreen: EquipmentScreen
     private lateinit var backupsScreen: BackupsScreen
     private lateinit var settingsScreen: SettingsScreen
@@ -65,6 +68,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var content: FrameLayout
     private lateinit var notice: TextView
+    private lateinit var stage: StageView
     private val tabViews = HashMap<Tab, Pair<View, TextView>>()
     private var tab = Tab.CAMERA
     private var shown: View? = null
@@ -83,6 +87,7 @@ class MainActivity : AppCompatActivity() {
     private val locationPermissions =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
             if (results.values.any { it }) {
+                AppLog.ui("location access allowed")
                 session.setLocationSync(true)
             } else {
                 showNotice("Location sync needs location access.")
@@ -112,6 +117,7 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         connectScreen = ConnectScreen(this)
         statusScreen = StatusScreen(this)
+        recipesScreen = RecipesScreen(this)
         equipmentScreen = EquipmentScreen(this)
         backupsScreen = BackupsScreen(this)
         settingsScreen = SettingsScreen(this)
@@ -123,7 +129,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
-                    combine(session.state, session.vitals, session.backup, session.restore) { _, _, _, _ -> }
+                    combine(session.state, session.vitals, session.backup, session.restore, session.recipes) { _, _, _, _, _ -> }
                         .collect { render() }
                 }
                 launch {
@@ -138,13 +144,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        stage.setRunning(true)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        stage.setRunning(false)
+    }
+
     // ---- layout ----
 
     private fun buildRoot(): View {
         val c = this
+        // The header is see-through: the stage's ceiling lamps hang above the title.
         val header = Kit.column(c).apply {
-            setBackgroundColor(Deco.HEADER)
-            setPadding(Deco.dpi(c, Kit.PAGE_MARGIN), Deco.dpi(c, 16), Deco.dpi(c, Kit.PAGE_MARGIN), Deco.dpi(c, 16))
+            setPadding(Deco.dpi(c, Kit.PAGE_MARGIN), Deco.dpi(c, HEADER_TOP), Deco.dpi(c, Kit.PAGE_MARGIN), Deco.dpi(c, 16))
             addView(Kit.row(c).apply {
                 addView(Kit.column(c).apply {
                     addView(Kit.label(c, "Fuji Remote", Deco.AMBER_LIGHT, 10f))
@@ -174,7 +190,12 @@ class MainActivity : AppCompatActivity() {
         val tabRow = Kit.row(c)
         for (t in Tab.entries) {
             val indicator = View(c)
-            val label = Kit.label(c, t.title, Deco.DIM, 10f).apply { gravity = Gravity.CENTER }
+            val label = Kit.label(c, t.title, Deco.DIM, 10f).apply {
+                gravity = Gravity.CENTER
+                maxLines = 1
+                // Five tabs on a narrow phone: let a long label shrink rather than wrap.
+                setAutoSizeTextTypeUniformWithConfiguration(7, 10, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+            }
             tabRow.addView(Kit.column(c).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
                 setPadding(0, 0, 0, Deco.dpi(c, 16))
@@ -186,13 +207,12 @@ class MainActivity : AppCompatActivity() {
             tabViews[t] = indicator to label
         }
         val tabBar = Kit.column(c).apply {
-            setBackgroundColor(Deco.HEADER)
+            setBackgroundColor(TAB_BAR)
             addView(Kit.hairline(c, Deco.BORDER))
             addView(tabRow)
         }
 
         val column = Kit.column(c).apply {
-            setBackgroundColor(Deco.BG)
             addView(header)
             addView(Kit.hairline(c, Deco.BORDER))
             addView(content, Kit.lp(h = 0, weight = 1f))
@@ -209,8 +229,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        stage = StageView(c)
         val root = FrameLayout(c).apply {
             setBackgroundColor(Deco.BG)
+            addView(stage, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
             addView(column, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
             addView(notice, FrameLayout.LayoutParams(Kit.MATCH, Kit.WRAP, Gravity.BOTTOM).apply {
                 val m = Deco.dpi(c, 16)
@@ -219,7 +241,8 @@ class MainActivity : AppCompatActivity() {
         }
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            header.setPadding(header.paddingLeft, bars.top + Deco.dpi(c, 16), header.paddingRight, header.paddingBottom)
+            header.setPadding(header.paddingLeft, bars.top + Deco.dpi(c, HEADER_TOP), header.paddingRight, header.paddingBottom)
+            stage.ceiling = bars.top
             tabBar.setPadding(0, 0, 0, bars.bottom)
             (notice.layoutParams as FrameLayout.LayoutParams).bottomMargin = bars.bottom + Deco.dpi(c, 96)
             insets
@@ -262,6 +285,7 @@ class MainActivity : AppCompatActivity() {
 
         val view = when (tab) {
             Tab.CAMERA -> if (connected != null) statusScreen.view else connectScreen.view
+            Tab.RECIPES -> recipesScreen.view
             Tab.EQUIPMENT -> equipmentScreen.view
             Tab.BACKUPS -> backupsScreen.view
             Tab.SETTINGS -> settingsScreen.view
@@ -273,6 +297,7 @@ class MainActivity : AppCompatActivity() {
         }
         when (tab) {
             Tab.CAMERA -> if (connected != null) statusScreen.render(connected, session.vitals.value) else connectScreen.render(state)
+            Tab.RECIPES -> recipesScreen.render(state, session.recipes.value, session.vitals.value)
             Tab.EQUIPMENT -> equipmentScreen.render(state, session.vitals.value)
             Tab.BACKUPS -> backupsScreen.render(state, session.backup.value, session.restore.value)
             Tab.SETTINGS -> settingsScreen.render(state)
@@ -360,14 +385,8 @@ class MainActivity : AppCompatActivity() {
     // ---- settings ----
 
     fun onLocationSyncToggled(on: Boolean) {
-        if (!on) {
-            session.setLocationSync(false)
-            render()
-            return
-        }
-        if (session.location.hasPermission()) {
-            session.setLocationSync(true)
-            render()
+        if (!on || session.location.hasPermission()) {
+            session.setLocationSync(on)
         } else {
             locationPermissions.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
         }
@@ -375,7 +394,8 @@ class MainActivity : AppCompatActivity() {
 
     // ---- backups ----
 
-    fun askBackupName() {
+    /** Name a new backup: downloaded now, or ([fromRecipes]) the settings file already read for the recipes. */
+    fun askBackupName(fromRecipes: Boolean = false) {
         val info = (session.state.value as? ConnState.Connected)?.info
         val default = listOfNotNull(
             info?.model,
@@ -396,7 +416,13 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Back up camera settings")
             .setView(box)
             .setPositiveButton("Save") { _, _ ->
-                if (!session.startBackup(input.text.toString().ifBlank { default })) showNotice("Wait for the current transfer to finish.")
+                val name = input.text.toString().ifBlank { default }
+                if (fromRecipes) {
+                    runCatching { session.saveRecipesAsBackup(name) }.onFailure { showNotice("Couldn't save the backup: ${it.message}") }
+                    backupsScreen.refreshList()
+                } else if (!session.startBackup(name)) {
+                    showNotice("Wait for the current transfer to finish.")
+                }
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -491,5 +517,12 @@ class MainActivity : AppCompatActivity() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivity(Intent.createChooser(intent, "Share"))
+    }
+
+    private companion object {
+        /** Room above the title for the stage's ceiling lamps, in dp. */
+        const val HEADER_TOP = 24
+        /** The tab bar: the night at 85%, so the haze shows faintly through it. */
+        const val TAB_BAR = 0xD9070A10.toInt()
     }
 }

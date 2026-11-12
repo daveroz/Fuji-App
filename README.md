@@ -5,6 +5,7 @@ built for the **X100VI** (firmware 1.30 and later, with Fujifilm's "secure" Blue
 It covers what Fujifilm's XApp does over Bluetooth, without the clutter:
 
 - **Camera**: live status of everything the camera reports, plus a remote shutter release
+- **Recipes**: the C1–C7 custom settings on the camera, by name
 - **Equipment**: shutter count and every usage counter the camera keeps
 - **Backups**: back up the camera's settings (your **C1–C7 recipes** included) and restore them
 - **Settings**: clock sync, optional location sync (geotagging), the camera's Bluetooth settings,
@@ -20,9 +21,10 @@ or redistributed.**
 | Tab | What's on it |
 |---|---|
 | **Camera** | Before connecting: find and pair a camera, or reconnect to a paired one. Connected: a readout strip (shots, power, Wi-Fi, firmware), the **remote release** (hold to focus, let go to shoot), and every value the camera reports, decoded and kept live. **State:** power switch, Wi-Fi access point, pictures waiting, why it's busy, card, firmware update. **Camera:** model, name, serial, firmware, model code. **Connection:** paired phones, connect while off, location sync and interval, transfer settings, activity log. **Lens**, and **Technical** details. |
+| **Recipes** | Your C1–C7 custom settings, read from the camera's settings file when you open the tab (about 2 seconds). Offline, the newest backup stands in. The file read for the recipes can be kept as a backup without downloading it again. |
 | **Equipment** | Total shots, shutter actuations against the rated shutter life, and all of the camera's usage counters: power-ons, operating, shooting and viewfinder time, viewfinder switches, flash, half-presses, OK and command-dial use, sensor cleanings, heat warnings and shutdowns, time spent with the sensor hot, battery, USB and lens counts, and the camera's error log. |
 | **Backups** | Back up the camera's settings file, restore it to the same model, share it, delete it. |
-| **Settings** | **Set the camera clock** (on by default, as XApp does). **Location sync** (off by default; see below). The camera's own **Smartphone location sync**, **location interval** and **Connect while power off** settings, written straight to the camera. **Log**: save, share, clear. |
+| **Settings** | **Set the camera clock** (on by default, as XApp does). The camera's **Location sync** (see below), **location interval** and **Connect while power off** settings, written straight to the camera. **Log**: save, share, clear. |
 
 The **LOG** button at the top of every screen saves the app's recording as a `.txt` file in
 **Downloads** (on Android 9 and lower you pick where). The recording runs all the time and
@@ -32,20 +34,27 @@ off, save it and send it.
 
 ### Location sync
 
-When the camera's *Smartphone location sync* is on, it asks the phone for its location every few
-seconds. Answering those requests is how XApp geotags pictures. In this app it's **off by
-default**, and while it's off the app doesn't listen to the requests at all. In field logs from an
-X100VI, every transfer the camera dropped came 1–2 s after a location request that went
-unanswered. Turn it on in Settings to geotag: the app then asks for location access, listens to
-the phone's GPS and network location while a camera is connected, and answers each request.
+Location sync is the camera's own setting. While it's on, the camera asks the phone for its
+location every few seconds, and the app answers each request with the phone's GPS or network
+location; that's how pictures get geotagged. Turning it on in Settings asks for location access
+first. While it's off, the camera doesn't ask.
+
+The app always listens for the requests, as XApp does: an X100VI only finishes its side of the
+connection once a phone has subscribed to them (see *How it works*). Requests left unanswered
+during a transfer made the camera drop the link in field logs, so without location access the app
+says so once and suggests turning Location sync off.
 
 ### Look
 
 The app uses the Deco "light in fog" design language from Worldly and the Deco launcher: a night
-stage, glass panels with hairline edges, one amber key light ("lit" means on), and spaced bold
-capital labels, set in **Carbon+** like Worldly, SAB Monitor and the Deco launcher
+stage in haze, glass panels with hairline edges, one amber key light ("lit" means on), and spaced
+bold capital labels, set in **Carbon+** like Worldly, SAB Monitor and the Deco launcher
 (`app/src/main/assets/fonts/`). The layout borrows the restraint of medium-format camera software:
 generous margins, big numerals for the readings that matter, small labels and hairline rules.
+
+Behind every screen is Worldly's stage: two slow washes of amber light, fog banks drifting
+through, a row of ceiling lamps running a slow chase, and fine grain. It animates only while the
+app is in front.
 
 ---
 
@@ -77,6 +86,12 @@ every write is a write with response. Every UUID, with its source, is in
   camera offered a changing value (`9a 8d 06`, `9c 8d 06`, …) and dropped the link when that was
   echoed back. After such a rejection it ignored transfer requests for 1–2 minutes. Writing the
   stored `65 48 26 20` worked every time.
+- **Subscriptions** follow XApp's order: AP state and transfer state (indications), then date sync,
+  **location sync**, camera name and logging setting. All of them matter. Without the location-sync
+  subscription an X100VI 1.31 read its power switch as `00 00`, never asked for the time and left
+  every shutter-count request unanswered; the moment it was subscribed, the power switch read
+  `01 02` (on) and the camera asked for the time and the location. Transfers also wait (up to 5 s)
+  for the camera to report its power switch.
 - **Live status**: every readable characteristic is read on connect and on refresh. Power,
   connect-while-off, location settings and vital-data changes notify, and the screen updates
   as they arrive.
@@ -95,7 +110,13 @@ every write is a write with response. Every UUID, with its source, is in
 - **Backup**: `BACKUP_REQUEST = 1` → `BACKUP_STATE = 1` → chunk size 120, index 0 → read a chunk on
   each state 1/2 → on state 3 check the sum, read the file name and size, then write
   `FILE_TRANSFER_RESULT = 3, 1`. The file is compressed settings data, about 2 KB on an X100VI.
-- **Shutter count**: the same download, started with `LOG_TRANSFER_REQUEST = 2`. The file is JSON
+- **Recipes**: the backup file is zlib data. Unpacked (70,524 bytes on an X100VI 1.31) it starts
+  with `FUJIFILMX-BACKUP`, the format version (`0100`) and the model, and ends with the seven
+  custom settings C1–C7, one 1 KB record each. A record starts with `0x15C` twice and holds the
+  slot's name at `0x269` (25 characters). The other values in a record aren't mapped yet, so only
+  the names are shown.
+- **Shutter count**: the same download, started with `LOG_TRANSFER_REQUEST = 2`. It's read
+  automatically once per connection. The file is JSON
   (`total_shot_count`, `rear_curtain_shutter_count`, `shutter_upper_limit_count`, …; 30 fields on
   an X100VI).
 - **Restore**: `RESTORE_REQUEST = 1` → `RESTORE_STATE = 1` → chunk size 120, index 0,
@@ -140,12 +161,14 @@ app/src/main/java/com/fujiapp/remote/
 │   ├── FujiCamera.kt      Registration, status, settings, shutter, backup, restore, shutter count
 │   ├── CameraScanner.kt   Finds cameras by Fujifilm's company ID (0x04D8)
 │   └── Bonding.kt         System pairing (numeric comparison)
-├── model/                 CameraSnapshot (all raw values, decoded), CameraInfo, CameraVitals, BackupMeta
+├── model/                 CameraSnapshot (all raw values, decoded), CameraInfo, CameraVitals, BackupMeta,
+│                          SettingsFile (the backup file: header and C1–C7 names, pure, tested)
 ├── data/BackupStore.kt    Backups in app storage (.dat as received + .json metadata)
 ├── util/                  AppLog (recorder), LogExporter (Downloads), AppSettings, PhoneLocation
 ├── CameraSession.kt       Scan → connect → pair → register → live status / features / transfers
 ├── App.kt                 Holds the session, starts the recorder, records crashes
-└── ui/                    Deco (design system), Kit (view builders), MainActivity, one class per screen
+└── ui/                    Deco (design system), Kit (view builders), StageView (the hazy stage),
+                           MainActivity, one class per screen
 ```
 
 ---

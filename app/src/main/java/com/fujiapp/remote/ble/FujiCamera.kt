@@ -39,7 +39,6 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
     suspend fun register(
         storedId: Long?,
         freshPairing: Boolean,
-        locationRequests: Boolean,
         onWaitingForPairing: () -> Unit,
     ): Long {
         if (!gatt.has(FujiGatt.DEVICE_IDENTIFICATION_NUMBER)) {
@@ -62,10 +61,7 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
         gatt.write(FujiGatt.DEVICE_IDENTIFICATION_NUMBER, ack)
         gatt.write(FujiGatt.CONNECTED_DEVICE_NAME, FujiProtocol.clientName())
 
-        val subscriptions = FujiGatt.REGISTRATION_SUBSCRIPTIONS +
-            (if (locationRequests) listOf(FujiGatt.LOCATION_SYNC_STATE) else emptyList()) +
-            FujiGatt.LIVE_SUBSCRIPTIONS
-        for (c in subscriptions) {
+        for (c in FujiGatt.REGISTRATION_SUBSCRIPTIONS + FujiGatt.LIVE_SUBSCRIPTIONS) {
             if (!gatt.has(c)) {
                 log("no ${c.name} on this camera, skipped")
                 continue
@@ -79,12 +75,6 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
         }
         log("registered")
         return FujiProtocol.idValue(ack)
-    }
-
-    /** Start or stop receiving the camera's location requests (location sync turned on or off). */
-    suspend fun setLocationRequests(on: Boolean) {
-        if (!gatt.has(FujiGatt.LOCATION_SYNC_STATE)) return
-        if (on) gatt.subscribe(FujiGatt.LOCATION_SYNC_STATE) else gatt.unsubscribe(FujiGatt.LOCATION_SYNC_STATE)
     }
 
     /**

@@ -25,7 +25,8 @@ class CameraSnapshot(val values: Map<UUID, ByteArray> = emptyMap()) {
             cameraName = text(FujiGatt.CAMERA_NAME),
             manufacturer = text(FujiGatt.MANUFACTURER),
             modelNumber = text(FujiGatt.MODEL_NUMBER),
-            serialNumber = text(FujiGatt.SERIAL_NUMBER) ?: text(FujiGatt.CAMERA_SERIAL_NUMBER),
+            // The body's serial (8 characters on an X100VI); Device information has a longer internal one.
+            serialNumber = text(FujiGatt.CAMERA_SERIAL_NUMBER) ?: text(FujiGatt.SERIAL_NUMBER),
             firmware = text(FujiGatt.FIRMWARE_REVISION),
             hardwareRevision = text(FujiGatt.HARDWARE_REVISION),
             softwareRevision = text(FujiGatt.SOFTWARE_REVISION),
@@ -56,9 +57,9 @@ class CameraSnapshot(val values: Map<UUID, ByteArray> = emptyMap()) {
                     "Power" to i.power?.label,
                     "Wi-Fi" to FujiProtocol.apState(this[FujiGatt.AP_STATE]),
                     "Transfer" to FujiProtocol.transferState(this[FujiGatt.TRANSFER_STATE]),
-                    "Busy because" to FujiProtocol.stateErrorDetails(this[FujiGatt.STATE_ERROR_DETAILS]),
+                    "Busy because" to FujiProtocol.busyReason(this[FujiGatt.STATE_ERROR_DETAILS]),
                     "Usage data" to this[FujiGatt.CAMERA_VITAL_STATE]?.let { if (vitalDataChanged) "Changed since last read" else "Up to date" },
-                    "Card" to u16(FujiGatt.CARD_STATE)?.let { "Code $it" },
+                    "Card" to u16(FujiGatt.CARD_STATE)?.let { if (it == 1) "Inserted" else "Code $it" },
                     "Firmware update" to u16(FujiGatt.FWUPDATE_STATE)?.let { if (it == 0) "Idle" else "Code $it" },
                 ),
             ),
@@ -97,6 +98,7 @@ class CameraSnapshot(val values: Map<UUID, ByteArray> = emptyMap()) {
             CameraInfo.Section(
                 "Technical",
                 rows(
+                    "Device serial" to text(FujiGatt.SERIAL_NUMBER)?.takeIf { it != i.serialNumber },
                     "Hardware" to i.hardwareRevision,
                     "Software" to i.softwareRevision,
                     "Bluetooth protocol" to i.bleProtocolVersion?.toString(),

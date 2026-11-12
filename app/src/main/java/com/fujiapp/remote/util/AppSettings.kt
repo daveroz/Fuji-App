@@ -12,17 +12,7 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean(KEY_SYNC_TIME, true)
         set(value) = prefs.edit { putBoolean(KEY_SYNC_TIME, value) }
 
-    /**
-     * Answer the camera's location requests with the phone's location (geotagging). Off by
-     * default: when it's off the app doesn't listen to the requests at all, because unanswered
-     * requests during a transfer made the camera drop the link.
-     */
-    var locationSync: Boolean
-        get() = prefs.getBoolean(KEY_LOCATION_SYNC, false)
-        set(value) = prefs.edit { putBoolean(KEY_LOCATION_SYNC, value) }
-
     private companion object {
         const val KEY_SYNC_TIME = "sync_time"
-        const val KEY_LOCATION_SYNC = "location_sync"
     }
 }

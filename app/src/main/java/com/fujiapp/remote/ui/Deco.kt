@@ -34,7 +34,6 @@ import androidx.core.graphics.createBitmap
 object Deco {
     // surfaces (darkest to lightest)
     const val BG = 0xFF05070B.toInt()
-    const val HEADER = 0xFF070A10.toInt()
     const val PANEL = 0xFF0B1220.toInt()
     const val SURFACE = 0xFF0D1422.toInt()
     const val SURFACE_HI = 0xFF131C2C.toInt()

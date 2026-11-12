@@ -20,13 +20,9 @@ class SettingsScreen(private val a: MainActivity) {
 
     private val locationSync = Kit.Toggle(
         c, "Location sync",
-        "Answer the camera's location requests so pictures are geotagged. Needs location access. " +
-            "Off: the app ignores the requests, which keeps transfers stable.",
+        "The camera asks for the phone's location every few seconds and geotags your pictures. " +
+            "Needs location access.",
     ) { on -> a.onLocationSyncToggled(on) }
-
-    private val cameraLocation = Kit.Toggle(c, "Smartphone location sync", "The camera's own setting: whether it asks a phone for its location.") { on ->
-        a.session.setCameraLocationSync(on)
-    }
     private val intervals = FujiGatt.LOCATION_SYNC_INTERVALS
     private val intervalChips = Kit.Chips(c, intervals.map { if (it < 60) "${it}s" else "${it / 60}m" }) { i ->
         a.session.setCameraLocationInterval(intervals[i])
@@ -44,13 +40,11 @@ class SettingsScreen(private val a: MainActivity) {
         addView(Kit.sectionTitle(c, "In this app"))
         addView(Kit.panel(c).apply {
             addView(syncTime.view)
-            addView(Kit.hairline(c))
-            addView(locationSync.view)
         })
 
         addView(Kit.sectionTitle(c, "On the camera"))
         addView(cameraPanel.apply {
-            addView(cameraLocation.view)
+            addView(locationSync.view)
             addView(Kit.hairline(c))
             addView(Kit.column(c).apply {
                 setPadding(0, Deco.dpi(c, 14), 0, Deco.dpi(c, 14))
@@ -94,20 +88,21 @@ class SettingsScreen(private val a: MainActivity) {
 
     fun render(state: ConnState) {
         syncTime.set(a.session.settings.syncTime)
-        locationSync.set(a.session.settings.locationSync)
         val connected = state as? ConnState.Connected
         val busy = a.session.isTransferring
         val s = connected?.snapshot
-        cameraLocation.set(s?.locationSyncOn)
+        locationSync.set(s?.locationSyncOn)
         connectWhileOff.set(s?.info?.connectWhilePowerOff)
         intervalChips.select(s?.locationSyncInterval?.let { intervals.indexOf(it) }?.takeIf { it >= 0 })
         val on = connected != null && !busy
-        cameraLocation.enable(on && s?.get(FujiGatt.LOCATION_SYNC_SETTING) != null)
+        locationSync.enable(on && s?.get(FujiGatt.LOCATION_SYNC_SETTING) != null)
         intervalChips.enable(on && s?.get(FujiGatt.LOCATION_SYNC_CYCLE) != null)
         connectWhileOff.enable(on && s?.get(FujiGatt.REMOTE_BOOT_SETTING) != null)
         cameraNote.text = when {
             connected == null -> "Connect to the camera to change its settings."
             busy -> "Wait for the current transfer to finish."
+            s?.locationSyncOn == true && !a.session.location.hasPermission() ->
+                "Location access is off, so the camera's location requests go unanswered. Turn Location sync off and on to allow it."
             else -> "Changes are written to the camera straight away."
         }
     }

@@ -92,4 +92,25 @@ class StatusTest {
         assertNull(rows["Lens" to "Lens firmware"]) // 00.00 is the fixed lens placeholder
         assertEquals(true, snapshot.locationSyncOn)
     }
+
+    @Test fun idle_camera_is_not_shown_as_busy() {
+        // An X100VI 1.31 read 00 00 here while idle (before it finished connecting).
+        assertNull(FujiProtocol.busyReason(bytes(0x00, 0x00)))
+        assertNull(FujiProtocol.busyReason(bytes(0x0E, 0x00)))
+        assertEquals("USB in use", FujiProtocol.busyReason(bytes(0x06, 0x00)))
+    }
+
+    @Test fun body_serial_comes_first_and_card_reads_as_inserted() {
+        // Values from an X100VI 1.31.
+        val snapshot = CameraSnapshot()
+            .with(FujiGatt.SERIAL_NUMBER, "2506172E50701117A6".toByteArray())
+            .with(FujiGatt.CAMERA_SERIAL_NUMBER, "52E06034\u0000\u0000".toByteArray())
+            .with(FujiGatt.CARD_STATE, bytes(0x01, 0x00))
+            .with(FujiGatt.STATE_ERROR_DETAILS, bytes(0x00, 0x00))
+        assertEquals("52E06034", snapshot.info.serialNumber)
+        val rows = snapshot.sections().flatMap { s -> s.rows.map { s.title to it.label to it.value } }.toMap()
+        assertEquals("Inserted", rows["State" to "Card"])
+        assertNull(rows["State" to "Busy because"])
+        assertEquals("2506172E50701117A6", rows["Technical" to "Device serial"])
+    }
 }

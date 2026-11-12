@@ -4,6 +4,7 @@ import android.content.Context
 import com.fujiapp.remote.ble.DownloadedFile
 import com.fujiapp.remote.model.BackupMeta
 import com.fujiapp.remote.model.CameraInfo
+import com.fujiapp.remote.model.SettingsFile
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
@@ -45,12 +46,28 @@ class BackupStore(context: Context) {
         )
         dataFile(meta).writeBytes(file.data)
         File(dir, "$id.json").writeText(meta.toJson().toString(2))
+        revision++
         return meta
     }
 
     fun dataFile(meta: BackupMeta): File = File(dir, "${meta.id}.dat")
 
+    private val parsed = HashMap<String, SettingsFile?>()
+
+    /** Goes up whenever a backup is saved or deleted, so screens know to look again. */
+    @Volatile
+    var revision = 0
+        private set
+
+    /** What's inside a backup (the C1–C7 names), read once and remembered; null if unreadable. */
+    @Synchronized
+    fun settings(meta: BackupMeta): SettingsFile? = parsed.getOrPut(meta.id) {
+        runCatching { SettingsFile.parse(dataFile(meta).readBytes()) }.getOrNull()
+    }
+
     fun delete(meta: BackupMeta) {
+        synchronized(this) { parsed.remove(meta.id) }
+        revision++
         dataFile(meta).delete()
         File(dir, "${meta.id}.json").delete()
     }

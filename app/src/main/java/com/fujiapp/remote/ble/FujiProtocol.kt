@@ -174,6 +174,12 @@ object FujiProtocol {
         else -> "Code $v"
     }
 
+    /**
+     * Why the camera is busy, or null when it isn't: only the specific reasons 1–13. 14 means
+     * none, and an X100VI also reports 0 ("other") while idle, before it has finished connecting.
+     */
+    fun busyReason(value: ByteArray?): String? = u16(value)?.takeIf { it in 1..13 }?.let { stateErrorDetails(value) }
+
     /** LOGGING_SETTING: one byte per activity-log item, in XApp's order. */
     val LOGGING_ITEMS: List<String> = listOf(
         "Model name", "Camera ID", "Power on/off", "Shooting", "Shooting location", "Shooting settings",
