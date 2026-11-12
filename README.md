@@ -52,6 +52,10 @@ The report says what was written and what the camera refused and why. The usual 
 DR400 need ISO 250 / 500 or higher in that slot** (set the slot's ISO to Auto). **Undo** puts the
 slot back as it was.
 
+Over Bluetooth, loading a recipe means editing the camera's settings file and restoring it;
+another app already does this on the X100VI. What's needed and the plan are in
+[docs/bluetooth-recipes.md](docs/bluetooth-recipes.md).
+
 What's possible, and how:
 
 | | Bluetooth | USB-C cable |

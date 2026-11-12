@@ -63,7 +63,11 @@ class RecipeTransfer(context: Context, private val store: BackupStore) {
     fun readSlots() = run("read slots") { cam ->
         val slots = (1..SLOTS).map { k ->
             _state.value = UsbJob.Working("Reading C$k…")
-            cam.readSlot(k)
+            cam.readSlot(k).also { slot ->
+                // Every value, so a log with a USB read and a Bluetooth settings download maps the
+                // settings file's slot records (docs/bluetooth-recipes.md).
+                AppLog.add("usb: slot C$k \"${slot.name}\" " + slot.values.entries.joinToString(" ") { "%04X=%04X".format(it.key, it.value and 0xFFFF) })
+            }
         }
         lastSlots = slots
         UsbJob.SlotsRead(slots, System.currentTimeMillis())
