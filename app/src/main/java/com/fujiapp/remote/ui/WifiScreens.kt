@@ -116,7 +116,12 @@ class PhotosScreen(private val a: MainActivity) {
     }
 }
 
-/** Remote shooting over Wi-Fi: live view, exposure, focus and the shutter, on one screen. */
+/**
+ * Remote shooting over Wi-Fi, on one screen: the live view, a readout laid out like a Hasselblad's
+ * rear screen (aperture and shutter speed large, ISO, the exposure scale, mode and shots left),
+ * a row of setting tiles like Leica's (film simulation, white balance, flash, timer, ISO), focus
+ * and the shutter.
+ */
 class RemoteScreen(private val a: MainActivity) {
     private val c = a
     private val status = Kit.text(c, null, 13f, Deco.MUTED)
@@ -135,18 +140,31 @@ class RemoteScreen(private val a: MainActivity) {
         visibility = View.GONE
     }
     private val frame = FrameLayout(c).apply {
+        background = Deco.box(c, 0xFF000000.toInt(), Deco.BORDER_SOFT, 6f)
         addView(live, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
         addView(marker, FrameLayout.LayoutParams(Deco.dpi(c, MARKER_DP), Deco.dpi(c, MARKER_DP)))
     }
-    private val mode = Kit.label(c, "", Deco.DIM, 10f)
-    private val shutterValue = value()
-    private val apertureValue = value()
-    private val exposureValue = value()
-    private val iso = Kit.PickerRow(c, "ISO") {
-        val choices = a.wifi.isoChoices
-        if (choices.isEmpty()) a.showNotice("The camera didn't list its ISO values.") else
-            a.choose("ISO", choices.map { v -> val n = v and 0x00FFFFFF; if (v and 0x80000000L != 0L) "Auto $n" else "$n" }, -1) { i -> a.wifi.setIso(choices[i]) }
-    }
+
+    // The readout (Hasselblad rear screen).
+    private val topLine = Kit.label(c, "", Deco.MUTED, 9f)
+    private val battery = Kit.label(c, "", Deco.MUTED, 9f).apply { gravity = Gravity.END }
+    private val apertureValue = big()
+    private val shutterValue = big().apply { gravity = Gravity.END }
+    private val isoValue = Kit.label(c, "", Deco.TEXT_SOFT, 11f).apply { gravity = Gravity.END }
+    private val evScale = EvScale(c)
+    private val evValue = Kit.label(c, "EV 0", Deco.TEXT_SOFT, 9f)
+    private val modeValue = Kit.text(c, "—", 22f, Deco.TEXT, bold = true)
+    private val shotsValue = Kit.text(c, "", 15f, Deco.TEXT_SOFT, bold = true).apply { gravity = Gravity.END }
+    private val apertureSteps = steps({ a.wifi.stepAperture(false) }, { a.wifi.stepAperture(true) }, "aperture")
+    private val shutterSteps = steps({ a.wifi.stepShutter(false) }, { a.wifi.stepShutter(true) }, "shutter speed")
+
+    // The tiles (Leica's grid), as XApp's remote offers these settings.
+    private val filmTile = Layouts.Tile(c, LineIcon.Kind.FILM, "Film sim") { pickSetting(FujiWifi.FILM_SIMULATION, "Film simulation") }
+    private val wbTile = Layouts.Tile(c, LineIcon.Kind.WB, "White bal.") { pickSetting(FujiWifi.WHITE_BALANCE, "White balance") }
+    private val flashTile = Layouts.Tile(c, LineIcon.Kind.FLASH, "Flash") { pickSetting(FujiWifi.FLASH, "Flash") }
+    private val timerTile = Layouts.Tile(c, LineIcon.Kind.TIMER, "Timer") { pickSetting(FujiWifi.SELF_TIMER, "Self-timer") }
+    private val isoTile = Layouts.Tile(c, LineIcon.Kind.ISO, "ISO") { pickIso() }
+
     private val focusButton = Kit.button(c, "Focus", Kit.Style.SECONDARY) {
         if (a.wifi.focused.value) a.wifi.releaseFocus() else {
             placeMarker(null)
@@ -155,71 +173,59 @@ class RemoteScreen(private val a: MainActivity) {
     }
     private var shownReadings: Map<String, String>? = null
     private var markerAt: Pair<Float, Float>? = null
-    private val settingsButton = Kit.button(c, "Settings", Kit.Style.QUIET) { openSettings() }
-    private val shutterRow = stepper("Shutter speed", shutterValue, { a.wifi.stepShutter(false) }, { a.wifi.stepShutter(true) })
-    private val apertureRow = stepper("Aperture", apertureValue, { a.wifi.stepAperture(false) }, { a.wifi.stepAperture(true) })
-
-    /** The camera's own settings, as XApp's remote offers them. */
-    /** The settings XApp's remote offers (besides exposure and ISO), in its order. */
-    private val settings = listOf(
-        FujiWifi.FILM_SIMULATION to "Film simulation",
-        FujiWifi.WHITE_BALANCE to "White balance",
-        FujiWifi.MACRO to "Macro",
-        FujiWifi.FLASH to "Flash",
-        FujiWifi.SELF_TIMER to "Self-timer",
-    )
-
-    private fun openSettings() {
-        if (a.wifi.phase.value != WifiPhase.Remote) return
-        // As XApp: only what the camera offers right now (film simulation, for one, isn't offered
-        // while a custom setting decides it).
-        val shown = settings.filter { (p, _) -> a.wifi.offers(p) }.ifEmpty { settings.filter { (p, _) -> p == FujiWifi.FILM_SIMULATION || p == FujiWifi.WHITE_BALANCE || p == FujiWifi.SELF_TIMER } }
-        val items = shown.map { (p, title) -> "$title: ${a.wifi.currentValue(p)?.let { settingLabel(p, it) } ?: "—"}" }
-        a.choose("Camera settings", items, -1) { i -> pickSetting(shown[i].first, shown[i].second) }
-    }
-
-    private fun pickSetting(property: Int, title: String) {
-        a.lifecycleScope.launch {
-            val desc = a.wifi.describeSetting(property)
-            val values = desc?.values.orEmpty()
-            if (desc == null || values.isEmpty()) {
-                a.showNotice("The camera doesn't offer a choice for $title right now.")
-                return@launch
-            }
-            val current = a.wifi.currentValue(property) ?: desc.current
-            a.choose(title, values.map { settingLabel(property, it) }, values.indexOf(current)) { i ->
-                a.wifi.setSetting(property, values[i], desc.width, title)
-            }
-        }
-    }
 
     val view: View = Kit.page(c, Kit.column(c).apply {
         addView(Kit.row(c).apply {
+            gravity = Gravity.CENTER_VERTICAL
             addView(Kit.column(c).apply {
                 addView(Kit.label(c, "Over Wi-Fi", Deco.DIM))
-                addView(Kit.text(c, "Remote", 26f), Kit.lp(top = Deco.dpi(c, 6)))
+                addView(Layouts.wideTitle(c, "Remote", 20f), Kit.lp(top = Deco.dpi(c, 6)))
             }, Kit.lp(0, weight = 1f))
-            addView(settingsButton)
             addView(Kit.button(c, "Close", Kit.Style.QUIET) { a.closeCameraPage() })
         })
-        addView(status, Kit.lp(top = Deco.dpi(c, 6)))
-        addView(progress, Kit.lp(top = Deco.dpi(c, 6)))
-        addView(frame, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 216)).apply { topMargin = Deco.dpi(c, 8) })
-        addView(mode, Kit.lp(top = Deco.dpi(c, 6)))
-        addView(Kit.panel(c, padV = 0).apply {
-            addView(shutterRow)
-            addView(Kit.hairline(c))
-            addView(apertureRow)
-            addView(Kit.hairline(c))
-            addView(stepper("Exposure", exposureValue, { a.wifi.stepExposure(false) }, { a.wifi.stepExposure(true) }))
-            addView(Kit.hairline(c))
-            addView(iso.view)
-        }, Kit.lp(top = Deco.dpi(c, 6)))
-        addView(Kit.text(c, "Turning a dial on the camera shows up here. A dial set to a value wins over the app.", 12f, Deco.DIM), Kit.lp(top = Deco.dpi(c, 6)))
+        addView(status, Kit.lp(top = Deco.dpi(c, 4)))
+        addView(progress, Kit.lp(top = Deco.dpi(c, 4)))
+        addView(frame, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 206)).apply { topMargin = Deco.dpi(c, 8) })
+        addView(Layouts.hero(c).apply {
+            setPadding(Deco.dpi(c, 14), Deco.dpi(c, 10), Deco.dpi(c, 14), Deco.dpi(c, 10))
+            addView(Kit.row(c).apply {
+                addView(topLine, Kit.lp(0, weight = 1f))
+                addView(battery, Kit.lp(Kit.WRAP))
+            })
+            addView(Kit.row(c).apply {
+                gravity = Gravity.BOTTOM
+                addView(Kit.column(c).apply {
+                    addView(apertureValue)
+                    addView(apertureSteps)
+                }, Kit.lp(0, weight = 1f))
+                addView(Kit.column(c).apply {
+                    gravity = Gravity.END
+                    addView(shutterValue, Kit.lp(Kit.MATCH))
+                    addView(shutterSteps, Kit.lp(Kit.WRAP).apply { gravity = Gravity.END })
+                }, Kit.lp(0, weight = 1f))
+            }, Kit.lp(top = Deco.dpi(c, 2)))
+            addView(Kit.row(c).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                addView(chevron("‹", "Less exposure") { a.wifi.stepExposure(false) })
+                addView(Kit.column(c).apply {
+                    addView(evScale, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 18)))
+                    addView(evValue, Kit.lp(top = Deco.dpi(c, 2)))
+                }, Kit.lp(0, weight = 1f))
+                addView(chevron("›", "More exposure") { a.wifi.stepExposure(true) })
+                addView(isoValue, Kit.lp(Kit.WRAP).apply { marginStart = Deco.dpi(c, 10) })
+            }, Kit.lp(top = Deco.dpi(c, 4)))
+            addView(Kit.hairline(c), Kit.lp(top = Deco.dpi(c, 6)))
+            addView(Kit.row(c).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                addView(modeValue, Kit.lp(0, weight = 1f))
+                addView(shotsValue, Kit.lp(Kit.WRAP))
+            }, Kit.lp(top = Deco.dpi(c, 4)))
+        }, Kit.lp(top = Deco.dpi(c, 8)))
+        addView(Layouts.tileRow(c, listOf(filmTile, wbTile, flashTile, timerTile, isoTile)), Kit.lp(top = Deco.dpi(c, 10)))
         addView(Kit.row(c).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(focusButton, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 16) })
-            addView(shutter(), LinearLayout.LayoutParams(Deco.dpi(c, 76), Deco.dpi(c, 76)))
+            addView(shutter(), LinearLayout.LayoutParams(Deco.dpi(c, 72), Deco.dpi(c, 72)))
         }, Kit.lp(top = Deco.dpi(c, 10)))
     })
 
@@ -232,23 +238,42 @@ class RemoteScreen(private val a: MainActivity) {
         }
     }
 
-    private fun value() = Kit.text(c, "—", 16f, Deco.TEXT, bold = true).apply {
-        gravity = Gravity.CENTER
-        maxLines = 1
-    }
+    private fun big() = Kit.text(c, "—", 32f, Deco.TEXT, bold = true).apply { maxLines = 1 }
 
-    private fun stepper(title: String, value: View, down: () -> Unit, up: () -> Unit): View = Kit.row(c).apply {
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(0, Deco.dpi(c, 5), 0, Deco.dpi(c, 5))
-        addView(Kit.text(c, title, 14f, Deco.TEXT_SOFT), Kit.lp(0, weight = 1f))
-        addView(stepButton("−", down), LinearLayout.LayoutParams(Deco.dpi(c, 46), Deco.dpi(c, 40)))
-        addView(value, LinearLayout.LayoutParams(Deco.dpi(c, 88), Kit.WRAP))
-        addView(stepButton("+", up), LinearLayout.LayoutParams(Deco.dpi(c, 46), Deco.dpi(c, 40)))
-    }
-
-    private fun stepButton(t: String, onClick: () -> Unit) = Kit.button(c, t, Kit.Style.SECONDARY, onClick).apply {
+    private fun chevron(t: String, description: String, onClick: () -> Unit) = Kit.button(c, t, Kit.Style.QUIET, onClick).apply {
         minHeight = 0
-        setPadding(0, 0, 0, 0)
+        minWidth = 0
+        minimumWidth = 0
+        textSize = 20f
+        setPadding(Deco.dpi(c, 10), 0, Deco.dpi(c, 10), 0)
+        contentDescription = description
+    }
+
+    private fun steps(down: () -> Unit, up: () -> Unit, what: String): View = Kit.row(c).apply {
+        addView(chevron("‹", "Lower $what", down))
+        addView(chevron("›", "Higher $what", up))
+    }
+
+    private fun pickIso() {
+        val choices = a.wifi.isoChoices
+        if (choices.isEmpty()) a.showNotice("The camera doesn't offer ISO values right now (its ISO dial may be set to a value).") else
+            a.choose("ISO", choices.map(::isoName), choices.indexOf(a.wifi.currentValue(FujiWifi.ISO) ?: -1L)) { i -> a.wifi.setIso(choices[i]) }
+    }
+
+    private fun pickSetting(property: Int, title: String) {
+        if (a.wifi.phase.value != WifiPhase.Remote) return
+        a.lifecycleScope.launch {
+            val desc = a.wifi.describeSetting(property)
+            val values = desc?.values.orEmpty()
+            if (desc == null || values.isEmpty()) {
+                a.showNotice("The camera doesn't offer $title right now. A custom setting (C1–C7) or a dial may decide it.")
+                return@launch
+            }
+            val current = a.wifi.currentValue(property) ?: desc.current
+            a.choose(title, values.map { settingLabel(property, it) }, values.indexOf(current)) { i ->
+                a.wifi.setSetting(property, values[i], desc.width, title)
+            }
+        }
     }
 
     private fun shutter(): View = View(c).apply {
@@ -311,33 +336,91 @@ class RemoteScreen(private val a: MainActivity) {
         status.text = when (phase) {
             is WifiPhase.Working -> phase.message
             is WifiPhase.Failed -> "Couldn't connect: ${phase.message}"
-            WifiPhase.Remote -> w.note.value ?: "Connected. Tap the picture to focus there, or the round button to shoot."
+            WifiPhase.Remote -> w.note.value ?: "Tap the picture to focus there, the round button to shoot."
             else -> "Not connected."
         }
         status.setTextColor(if (phase is WifiPhase.Failed) Deco.RED else Deco.MUTED)
         val ready = phase == WifiPhase.Remote
         Kit.setEnabled(focusButton, ready)
-        Kit.setEnabled(settingsButton, ready)
+        listOf(filmTile to FujiWifi.FILM_SIMULATION, wbTile to FujiWifi.WHITE_BALANCE, flashTile to FujiWifi.FLASH, timerTile to FujiWifi.SELF_TIMER).forEach { (t, p) ->
+            t.enable(ready && w.offers(p))
+            t.set(w.currentValue(p)?.let { shortLabel(p, it) } ?: "—")
+        }
+        isoTile.enable(ready)
+        isoTile.set(w.currentValue(FujiWifi.ISO)?.let(::isoName)?.uppercase() ?: "—")
         // In P and A the camera picks the shutter speed; in P and S, the aperture.
         val exposureMode = w.currentValue(FujiWifi.SHOOTING_MODE)
-        shutterRow.alpha = if (exposureMode == 2L || exposureMode == 3L) 0.5f else 1f
-        apertureRow.alpha = if (exposureMode == 2L || exposureMode == 4L) 0.5f else 1f
+        shutterSteps.alpha = if (exposureMode == 2L || exposureMode == 3L) 0.35f else 1f
+        apertureSteps.alpha = if (exposureMode == 2L || exposureMode == 4L) 0.35f else 1f
         val focused = w.focused.value
         focusButton.text = if (focused) "Let go of focus" else "Focus"
         if (focused) marker.alpha = 1f else if (!ready) marker.isVisible = false
         val r = w.readings.value
         if (r != shownReadings) {
             shownReadings = r
+            apertureValue.text = r["Aperture"] ?: "f/—"
             shutterValue.text = r["Shutter"] ?: "—"
-            apertureValue.text = r["Aperture"] ?: "—"
-            exposureValue.text = r["Exposure"] ?: "—"
-            iso.set(r["ISO"] ?: "—")
-            mode.text = listOfNotNull(r["Mode"]?.let { "Mode $it" }, r["Battery"]?.let { "Battery $it" }).joinToString("  ·  ")
+            val isoText = "ISO ${r["ISO"]?.uppercase() ?: "—"}"
+            isoValue.text = isoText
+            val ev = w.currentValue(FujiWifi.EXPOSURE_BIAS)?.let { it.toInt().toShort() / 1000.0 } ?: 0.0
+            evScale.set(ev)
+            val evText = "EV ${r["Exposure"] ?: "0"}"
+            evValue.text = evText
+            modeValue.text = r["Mode"] ?: "—"
+            shotsValue.text = r["Shots"] ?: ""
+            battery.text = r["Battery"]?.let { "BATTERY $it" } ?: ""
+            topLine.text = listOfNotNull(
+                w.currentValue(FujiWifi.WHITE_BALANCE)?.let { "WB " + shortLabel(FujiWifi.WHITE_BALANCE, it) },
+                w.currentValue(FujiWifi.FOCUS_MODE)?.let { shortLabel(FujiWifi.FOCUS_MODE, it) },
+                w.currentValue(FujiWifi.FILM_SIMULATION)?.let { shortLabel(FujiWifi.FILM_SIMULATION, it) },
+            ).joinToString("   ")
         }
     }
 
     private companion object {
         const val MARKER_DP = 44
+    }
+}
+
+/** The exposure scale of a camera's rear screen: −3 … +3 in thirds, a mark at the value. */
+@android.annotation.SuppressLint("ViewConstructor") // made in code only
+private class EvScale(c: android.content.Context) : View(c) {
+    private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private var ev = 0.0
+
+    fun set(value: Double) {
+        if (value != ev) {
+            ev = value
+            invalidate()
+        }
+    }
+
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val pad = h * 0.3f
+        val span = w - 2 * pad
+        p.strokeWidth = maxOf(1f, h * 0.06f)
+        for (k in -9..9) {
+            val x = pad + span * (k + 9) / 18f
+            val whole = k % 3 == 0
+            p.color = if (k == 0) Deco.TEXT_SOFT else Deco.DIM
+            canvas.drawLine(x, h * (if (whole) 0.25f else 0.45f), x, h * 0.75f, p)
+        }
+        val x = pad + span * ((ev.coerceIn(-3.0, 3.0) + 3) / 6.0).toFloat()
+        p.color = Deco.AMBER
+        p.strokeWidth = maxOf(2f, h * 0.12f)
+        canvas.drawLine(x, 0f, x, h, p)
+    }
+}
+
+/** ISO as XApp shows it: Auto with its ceiling, or the value (0x40000000 marks L/H). */
+internal fun isoName(v: Long): String {
+    val n = v and 0x00FFFFFF
+    return when {
+        v and 0x80000000L != 0L -> "Auto $n"
+        v and 0x40000000L != 0L -> if (n <= 400) "L $n" else "H $n"
+        else -> "$n"
     }
 }
 
@@ -362,14 +445,40 @@ private class TapImageView(c: android.content.Context) : androidx.appcompat.widg
     override fun performClick(): Boolean = super.performClick()
 }
 
-/** A readable name for a camera setting's value; the number when it isn't known. */
+/** Film simulations by the codes the remote uses, named as XApp names them. */
+private val FILM_NAMES = mapOf(
+    1L to "Provia / Standard", 2L to "Velvia / Vivid", 3L to "Astia / Soft", 4L to "Monochrome", 5L to "Sepia",
+    20L to "Reala Ace", 6L to "Pro Neg. Hi", 7L to "Pro Neg. Std", 8L to "Monochrome + Ye", 9L to "Monochrome + R",
+    10L to "Monochrome + G", 11L to "Classic Chrome", 17L to "Classic Neg.", 16L to "Eterna / Cinema", 12L to "Acros",
+    13L to "Acros + Ye", 14L to "Acros + R", 15L to "Acros + G", 18L to "Eterna Bleach Bypass", 19L to "Nostalgic Neg.",
+)
+
+/** White balance by the remote's codes (not the custom-setting ones), named as XApp names them. */
+private val WB_NAMES = mapOf(
+    2L to "Auto", 0x800DL to "Auto, white priority", 0x800EL to "Auto, ambience priority", 4L to "Daylight",
+    0x8006L to "Shade", 0x8001L to "Fluorescent 1", 0x8002L to "Fluorescent 2", 0x8003L to "Fluorescent 3",
+    6L to "Incandescent", 0x800AL to "Underwater", 0x800BL to "Color temperature", 0x800CL to "Custom 1",
+)
+
+/** A readable name for a camera setting's value (XApp's names); the number when it isn't known. */
 internal fun settingLabel(property: Int, v: Long): String = when (property) {
-    FujiWifi.FILM_SIMULATION -> com.fujiapp.remote.recipe.FilmSim.of(v.toInt())?.label
-    FujiWifi.WHITE_BALANCE -> com.fujiapp.remote.recipe.WhiteBalance.entries.firstOrNull { it.code.toLong() == v }?.label
+    FujiWifi.FILM_SIMULATION -> FILM_NAMES[v]
+    FujiWifi.WHITE_BALANCE -> WB_NAMES[v]
     FujiWifi.FOCUS_MODE -> when (v) {
-        1L -> "Manual"
-        0x8001L -> "Single AF (AF-S)"
-        0x8002L -> "Continuous AF (AF-C)"
+        1L -> "Manual focus"
+        0x8001L -> "Single AF"
+        0x8002L -> "Continuous AF"
+        else -> null
+    }
+    FujiWifi.FLASH -> when (v) {
+        0x8009L -> "Off"
+        0x800AL -> "On"
+        else -> null
+    }
+    FujiWifi.SELF_TIMER -> when (v) {
+        0L -> "Off"
+        2L -> "2 seconds"
+        4L -> "10 seconds"
         else -> null
     }
     FujiWifi.IMAGE_QUALITY -> when (v) {
@@ -380,23 +489,32 @@ internal fun settingLabel(property: Int, v: Long): String = when (property) {
         5L -> "RAW + Normal"
         else -> null
     }
+    else -> null
+} ?: "Value %X".format(v)
+
+/** The short form a tile or the readout's top line shows. */
+internal fun shortLabel(property: Int, v: Long): String = when (property) {
+    FujiWifi.FILM_SIMULATION -> FILM_NAMES[v]?.substringBefore(" /")?.replace(" + ", "+")?.uppercase()
+    FujiWifi.WHITE_BALANCE -> when (v) {
+        2L -> "AUTO"
+        0x800DL -> "AUTO W"
+        0x800EL -> "AUTO A"
+        0x800BL -> "K"
+        0x800CL -> "C1"
+        else -> WB_NAMES[v]?.uppercase()
+    }
+    FujiWifi.FOCUS_MODE -> when (v) {
+        1L -> "MF"
+        0x8001L -> "AF-S"
+        0x8002L -> "AF-C"
+        else -> null
+    }
+    FujiWifi.FLASH -> settingLabel(property, v).uppercase()
     FujiWifi.SELF_TIMER -> when (v) {
-        0L -> "Off"
-        2L -> "2 s"
-        4L -> "10 s"
-        else -> null
-    }
-    FujiWifi.FLASH -> when (v) {
-        1L -> "Auto"
-        2L -> "Off"
-        3L -> "Fill flash"
-        4L -> "Red-eye, auto"
-        5L -> "Red-eye, fill"
-        else -> null
-    }
-    FujiWifi.MACRO -> when (v) {
-        0L, 1L -> if (v == 1L) "On" else "Off"
+        0L -> "OFF"
+        2L -> "2 S"
+        4L -> "10 S"
         else -> null
     }
     else -> null
-} ?: "Setting 0x%X".format(v)
+} ?: "%X".format(v)

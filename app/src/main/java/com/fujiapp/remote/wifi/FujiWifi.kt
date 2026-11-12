@@ -566,6 +566,8 @@ class FujiWifi private constructor(
         const val SEARCH_FORMAT = 0xD604
         const val RAW_FILES = 16
         const val MACRO = 0xD01D
+        /** Shots left on the card (XApp's PROPERTY_REMAINING_SHEET). */
+        const val SHOTS_LEFT = 0xD229
         const val FLASH = 0x500C
         const val EXPOSURE_BIAS = 0x5010
         const val FILM_SIMULATION = 0xD001

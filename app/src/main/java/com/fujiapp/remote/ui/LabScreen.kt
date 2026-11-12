@@ -100,9 +100,30 @@ class LabScreen(private val a: MainActivity) {
         })
     }
 
-    private val filmSim = Kit.Chips(c, SIMS.map { it.second }) { i ->
+    /** Film simulations as a strip of thumbnails of the picture, each in its look (a phone camera's filter row). */
+    private val filmSim = FilmStrip(c, SIMS.map { it.second }) { i ->
         val sim = SIMS[i].first
         change(recipe.copy(filmSim = sim, monoWarmCool = if (sim.toning) recipe.monoWarmCool else 0, monoMagentaGreen = if (sim.toning) recipe.monoMagentaGreen else 0))
+    }
+    private var thumbSource: PreviewSource? = null
+    private var thumbJob: Job? = null
+
+    /** Render every film simulation's thumbnail from the picture, with the rest of the recipe as it is. */
+    private fun requestThumbs() {
+        val src = thumbSource ?: return
+        val r = recipe
+        thumbJob?.cancel()
+        thumbJob = a.lifecycleScope.launch {
+            delay(THUMB_DEBOUNCE_MS)
+            val bitmaps = withContext(Dispatchers.Default) {
+                SIMS.map { (sim, _) ->
+                    val px = IntArray(src.pixels.size)
+                    RecipePreview.render(src, r.copy(filmSim = sim, monoWarmCool = if (sim.toning) r.monoWarmCool else 0, monoMagentaGreen = if (sim.toning) r.monoMagentaGreen else 0), px)
+                    createBitmap(src.width, src.height).apply { setPixels(px, 0, src.width, 0, 0, src.width, src.height) }
+                }
+            }
+            filmSim.setThumbs(bitmaps)
+        }
     }
     private val grain = Kit.Chips(c, listOf("Off", "Weak S", "Strong S", "Weak L", "Strong L")) { i -> change(recipe.copy(grain = Grain.entries[i])) }
     private val chrome = Kit.Chips(c, listOf("Off", "Weak", "Strong")) { i -> change(recipe.copy(colorChrome = Effect.entries[i])) }
@@ -128,7 +149,7 @@ class LabScreen(private val a: MainActivity) {
     private val monoNote = Kit.text(c, "Monochrome: color and the color chrome effects don't apply.", 13f, Deco.MUTED)
 
     private val groups: List<View> = listOf(
-        group(labelled("Film simulation", filmSim.view), grainRow, toneWc.view, toneMg.view),
+        group(labelled("Film simulation", filmSim), grainRow, toneWc.view, toneMg.view),
         group(color.view, chromeRow, chromeBlueRow, monoNote),
         group(whiteBalance.view, kelvin.view, wbRed.view, wbBlue.view),
         group(labelled("Dynamic range", dynamicRange.view), highlight.view, shadow.view),
@@ -304,8 +325,11 @@ class LabScreen(private val a: MainActivity) {
     fun load(r: Recipe) = change(r.copy(name = r.cameraName))
 
     private fun change(r: Recipe) {
+        val simOnly = r.copy(filmSim = recipe.filmSim, monoWarmCool = recipe.monoWarmCool, monoMagentaGreen = recipe.monoMagentaGreen) == recipe
         recipe = r
         show()
+        // The thumbnails show the other settings too; picking a film simulation alone doesn't change them.
+        if (!simOnly) requestThumbs()
         if (canDevelop()) {
             // Keep the camera's last picture up until the new one arrives (about a second).
             if (developed != null && !showingOriginal) status.text = DEVELOPING
@@ -415,6 +439,14 @@ class LabScreen(private val a: MainActivity) {
             }
             source = src
             original = orig
+            thumbSource = withContext(Dispatchers.Default) {
+                val tw = THUMB_W
+                val th = maxOf(1, orig.height * tw / orig.width)
+                val small = orig.scale(tw, th)
+                val px = IntArray(tw * th).also { small.getPixels(it, 0, tw, 0, 0, tw, th) }
+                PreviewSource(tw, th, px)
+            }
+            requestThumbs()
             rendered = createBitmap(src.width, src.height)
             scopeBitmap = createBitmap(SCOPE, SCOPE)
             fitFrame(src.width, src.height)
@@ -468,6 +500,8 @@ class LabScreen(private val a: MainActivity) {
         /** Longest side the camera's developed JPEG is shown at. */
         private const val DEVELOPED_MAX = 1400
         private const val DEVELOPING = "Developing on the camera…"
+        private const val THUMB_W = 128
+        private const val THUMB_DEBOUNCE_MS = 250L
         /** How long the controls must rest before the camera develops again. */
         private const val AUTO_DEVELOP_MS = 600L
         private const val FRAME_DP = 224
@@ -536,5 +570,66 @@ private class RoundedImageView(c: android.content.Context, private val radius: F
         canvas.clipPath(clip)
         super.onDraw(canvas)
         canvas.restoreToCount(save)
+    }
+}
+
+/**
+ * A scrolling row of film simulations, each a small picture in its look with the name under it;
+ * the chosen one is lit and scrolled into view.
+ */
+@SuppressLint("ViewConstructor") // made in code only
+private class FilmStrip(c: android.content.Context, names: List<String>, private val onPick: (Int) -> Unit) : android.widget.HorizontalScrollView(c) {
+    private val row = Kit.row(c)
+    private val images = mutableListOf<ImageView>()
+    private val labels = mutableListOf<android.widget.TextView>()
+    private val cells = mutableListOf<View>()
+    private var selected: Int? = null
+
+    init {
+        isHorizontalScrollBarEnabled = false
+        names.forEachIndexed { i, name ->
+            val image = ImageView(c).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setBackgroundColor(Deco.SURFACE)
+                outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: android.graphics.Outline) {
+                        outline.setRoundRect(0, 0, view.width, view.height, Deco.dp(c, 6f))
+                    }
+                }
+                clipToOutline = true
+            }
+            val label = Kit.label(c, name, Deco.DIM, 8f).apply { gravity = Gravity.CENTER; maxLines = 1 }
+            val cell = Kit.column(c).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                val pad = Deco.dpi(c, 3)
+                setPadding(pad, pad, pad, pad)
+                addView(image, LinearLayout.LayoutParams(Deco.dpi(c, 72), Deco.dpi(c, 50)))
+                addView(label, LinearLayout.LayoutParams(Deco.dpi(c, 76), Kit.WRAP).apply { topMargin = Deco.dpi(c, 5) })
+                isClickable = true
+                contentDescription = name
+                setOnClickListener { onPick(i) }
+            }
+            images += image
+            labels += label
+            cells += cell
+            row.addView(cell, LinearLayout.LayoutParams(Kit.WRAP, Kit.WRAP).apply { marginEnd = Deco.dpi(c, 4) })
+        }
+        addView(row)
+    }
+
+    fun setThumbs(bitmaps: List<Bitmap>) {
+        bitmaps.forEachIndexed { i, b -> images.getOrNull(i)?.setImageBitmap(b) }
+    }
+
+    fun select(index: Int?) {
+        if (index != selected && index != null) {
+            cells.getOrNull(index)?.let { cell -> post { smoothScrollTo(maxOf(0, cell.left - Deco.dpi(context, 24)), 0) } }
+        }
+        selected = index
+        cells.forEachIndexed { i, cell ->
+            val on = i == index
+            cell.background = if (on) Deco.box(context, Deco.KEY_GLASS, Deco.AMBER, 9f) else null
+            labels[i].setTextColor(if (on) Deco.AMBER_LIGHT else Deco.DIM)
+        }
     }
 }

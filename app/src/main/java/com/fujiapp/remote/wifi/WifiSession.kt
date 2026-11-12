@@ -455,6 +455,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
             "Exposure" to v[FujiWifi.EXPOSURE_BIAS]?.let { ev -> val e = ev.toInt().toShort() / 1000.0; (if (e > 0) "+" else "") + trim(e) },
             "Mode" to v[FujiWifi.SHOOTING_MODE]?.let(::modeText),
             "Battery" to (v[FujiWifi.BATTERY_LEVELS]?.let(::batteryText) ?: v[FujiWifi.BATTERY]?.let { if (it in 1..3) "${it * 100 / 3}%" else null }),
+            "Shots" to v[FujiWifi.SHOTS_LEFT]?.takeIf { it in 1..99_999 }?.let { String.format(Locale.US, "%d", it) },
         ).filterValues { it != null }.mapValues { it.value!! }
     }
 
@@ -620,7 +621,9 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         /** Values each setting is known to take, for when the camera doesn't list them. */
         private val KNOWN_VALUES: Map<Int, List<Long>> = mapOf(
             FujiWifi.FILM_SIMULATION to com.fujiapp.remote.recipe.FilmSim.entries.map { it.code.toLong() },
-            FujiWifi.WHITE_BALANCE to listOf(0x0002L, 0x0004L, 0x8006L, 0x8001L, 0x8002L, 0x8003L, 0x0006L, 0x0008L),
+            // The remote's white balance codes (XApp's list), not the custom-setting ones.
+            FujiWifi.WHITE_BALANCE to listOf(2L, 0x800DL, 0x800EL, 4L, 0x8006L, 0x8001L, 0x8002L, 0x8003L, 6L, 0x800AL, 0x800BL),
+            FujiWifi.FLASH to listOf(0x8009L, 0x800AL),
             // CaptureDelay as libfuji reads it: 0 off, 2 = 2 s, 4 = 10 s.
             FujiWifi.SELF_TIMER to listOf(0L, 2L, 4L),
         )
@@ -633,6 +636,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
             FujiWifi.SHUTTER_SPEED, FujiWifi.EXPOSURE_TIME, FujiWifi.F_NUMBER, FujiWifi.ISO,
             FujiWifi.EXPOSURE_BIAS, FujiWifi.SHOOTING_MODE, FujiWifi.BATTERY_LEVELS, FujiWifi.BATTERY,
             FujiWifi.FILM_SIMULATION, FujiWifi.WHITE_BALANCE, FujiWifi.MACRO, FujiWifi.FLASH, FujiWifi.SELF_TIMER,
+            FujiWifi.FOCUS_MODE, FujiWifi.SHOTS_LEFT,
         )
     }
 }

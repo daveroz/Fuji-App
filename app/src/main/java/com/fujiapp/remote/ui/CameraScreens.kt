@@ -121,13 +121,23 @@ class StatusScreen(private val a: MainActivity) {
     private val sections = Kit.column(c)
     private val remoteCard = Kit.column(c)
 
+    private val heroTitle = Layouts.wideTitle(c, "", 18f)
+    private val heroDetail = Kit.label(c, "", Deco.DIM, 9f)
+
+    // Laid out like Hasselblad's app: the camera in a dark panel, its name set wide, a row of spec
+    // icons, then the two things to do with it as panels with an arrow.
     val view: View = Kit.page(c, Kit.column(c).apply {
-        addView(art, Kit.lp(top = Deco.dpi(c, 2)))
+        addView(Layouts.hero(c).apply {
+            addView(art, Kit.lp())
+            addView(heroTitle, Kit.lp(top = Deco.dpi(c, 12)))
+            addView(heroDetail, Kit.lp(top = Deco.dpi(c, 6)))
+            addView(Kit.hairline(c), Kit.lp(top = Deco.dpi(c, 14)))
+            addView(strip, Kit.lp(top = Deco.dpi(c, 14)))
+        }, Kit.lp(top = Deco.dpi(c, 2)))
         addView(Kit.row(c).apply {
             addView(tile("Photos", "Browse and download over Wi-Fi") { a.openCameraPage(MainActivity.CameraPage.PHOTOS) }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
             addView(tile("Remote", "Live view, exposure, shutter") { a.openCameraPage(MainActivity.CameraPage.REMOTE) }, Kit.lp(0, weight = 1f))
-        }, Kit.lp(top = Deco.dpi(c, 14)))
-        addView(strip, Kit.lp(top = Deco.dpi(c, 14)))
+        }, Kit.lp(top = Deco.dpi(c, 12)))
         addView(remoteCard)
         addView(sections)
         addView(Kit.row(c).apply {
@@ -161,15 +171,17 @@ class StatusScreen(private val a: MainActivity) {
             PowerState.ASLEEP_STANDBY, PowerState.OFF_STANDBY -> "Standby"
             null -> "—"
         }
+        heroTitle.text = (state.info.model ?: state.info.displayName).uppercase()
+        heroDetail.text = listOfNotNull("FUJIFILM", state.info.cameraName, state.info.firmware?.let { "FW $it" }).joinToString("  ·  ")
         strip.removeAllViews()
         strip.addView(
-            Kit.readoutStrip(
+            Layouts.specRow(
                 c,
                 listOf(
-                    "Shots" to (shots?.let { String.format(Locale.getDefault(), "%,d", it) } ?: "—"),
-                    "Power" to power,
-                    "Wi-Fi" to (FujiProtocol.apState(s[FujiGatt.AP_STATE])?.substringBefore(',') ?: "—"),
-                    "Firmware" to (state.info.firmware ?: "—"),
+                    Layouts.Spec(LineIcon.Kind.SHOTS, shots?.let { String.format(Locale.getDefault(), "%,d", it) } ?: "—", "SHOTS"),
+                    Layouts.Spec(LineIcon.Kind.POWER, power, "POWER"),
+                    Layouts.Spec(LineIcon.Kind.WIFI, FujiProtocol.apState(s[FujiGatt.AP_STATE])?.substringBefore(',') ?: "—", "WI-FI"),
+                    Layouts.Spec(LineIcon.Kind.CHIP, state.info.firmware ?: "—", "FIRMWARE"),
                 ),
             )
         )
@@ -178,13 +190,19 @@ class StatusScreen(private val a: MainActivity) {
         s.sections().forEach { sections.addView(Kit.sectionPanel(c, it)) }
     }
 
-    /** A feature tile, like XApp's home: a lit title and a line under it. */
+    /** A panel to go somewhere, like Hasselblad's "Discover": the title set wide, a line, an arrow. */
     private fun tile(title: String, detail: String, onClick: () -> Unit): View = Kit.column(c).apply {
-        background = Deco.pressable(Deco.glass(c, 18f), Deco.box(c, Deco.SURFACE_HI, Deco.BORDER_STRONG, 18f))
-        setPadding(Deco.dpi(c, 16), Deco.dpi(c, 16), Deco.dpi(c, 16), Deco.dpi(c, 16))
-        addView(Kit.label(c, title, Deco.AMBER_LIGHT, 12f))
-        addView(Kit.text(c, detail, 13f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 8)))
+        background = Deco.pressable(Deco.box(c, Deco.PANEL, Deco.BORDER_SOFT, 6f), Deco.box(c, Deco.SURFACE_HI, Deco.BORDER_STRONG, 6f))
+        setPadding(Deco.dpi(c, 16), Deco.dpi(c, 14), Deco.dpi(c, 16), Deco.dpi(c, 14))
+        addView(Kit.row(c).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(Kit.label(c, title, Deco.AMBER_LIGHT, 12f), Kit.lp(0, weight = 1f))
+            addView(Kit.text(c, "→", 16f, Deco.AMBER_LIGHT))
+        })
+        addView(Kit.hairline(c), Kit.lp(top = Deco.dpi(c, 10)))
+        addView(Kit.text(c, detail, 12f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 10)))
         isClickable = true
+        contentDescription = title
         setOnClickListener { onClick() }
     }
 
