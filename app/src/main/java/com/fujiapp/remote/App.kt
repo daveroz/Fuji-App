@@ -11,6 +11,7 @@ class App : Application() {
     val transfer: RecipeTransfer by lazy { RecipeTransfer(this, session.store) }
     val myRecipes: MyRecipes by lazy { MyRecipes(this) }
     val wifi: com.fujiapp.remote.wifi.WifiSession by lazy { com.fujiapp.remote.wifi.WifiSession(this, session) }
+    val developer: com.fujiapp.remote.usb.RawDeveloper by lazy { com.fujiapp.remote.usb.RawDeveloper(this) }
 
     override fun onCreate() {
         super.onCreate()

@@ -139,6 +139,14 @@ class CameraSession(context: Context) {
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice.asStateFlow()
 
+    /** True while photos or the remote run over the camera's Wi-Fi: Bluetooth then stays down. */
+    private val wifiActive = MutableStateFlow(false)
+
+    fun setWifiActive(on: Boolean) {
+        if (wifiActive.value != on) AppLog.add("wifi session ${if (on) "starting" else "ended"}")
+        wifiActive.value = on
+    }
+
     /** One camera operation at a time (info read, setting write or file transfer). */
     private val opLock = Mutex()
 
@@ -287,8 +295,15 @@ class CameraSession(context: Context) {
 
                 client.disconnected.first { it }
                 if (gatt !== client || userDisconnected) return
-                AppLog.add("connection lost, reconnecting")
                 cleanup()
+                if (wifiActive.value) {
+                    // The camera ends Bluetooth when its Wi-Fi takes over; reconnecting would pull it off Wi-Fi.
+                    AppLog.add("Bluetooth closed by the camera for Wi-Fi; reconnecting after Wi-Fi")
+                    _state.value = ConnState.Connecting("On the camera's Wi-Fi. Bluetooth reconnects afterwards.")
+                    wifiActive.first { !it }
+                    if (userDisconnected) return
+                }
+                AppLog.add("connection lost, reconnecting")
                 reconnecting = true
             } catch (c: CancellationException) {
                 throw c

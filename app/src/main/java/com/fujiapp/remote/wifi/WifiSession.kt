@@ -267,12 +267,19 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         job = scope.launch {
             try {
                 _phase.value = WifiPhase.Working("Asking the camera to start its Wi-Fi…")
+                // The camera closes Bluetooth once its Wi-Fi is up; reconnecting then would pull it off Wi-Fi.
+                camera.setWifiActive(true)
                 val net = camera.wakeWifi(function)
                 AppLog.add("wifi: camera network ${net.ssid}")
                 _phase.value = WifiPhase.Working("Joining ${net.ssid}… Allow the connection when Android asks.")
                 val network = join.join(net.ssid, net.password)
+                AppLog.add("wifi: joined ${net.ssid}")
                 _phase.value = WifiPhase.Working("Connecting to the camera…")
-                val w = withContext(Dispatchers.IO) { FujiWifi.connect(network.socketFactory, CLIENT_NAME, AppLog::add) }
+                val w = withContext(Dispatchers.IO) {
+                    FujiWifi.connect(network.socketFactory, CLIENT_NAME, AppLog::add) {
+                        _phase.value = WifiPhase.Working("On the camera, press OK to allow the connection.")
+                    }
+                }
                 wifi = w
                 withContext(Dispatchers.IO) {
                     w.waitForAccess(ACCESS_TIMEOUT_MS) { _phase.value = WifiPhase.Working("Press OK on the camera to allow the connection.") }
@@ -290,6 +297,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         AppLog.error("wifi $what", t)
         _phase.value = WifiPhase.Failed(t.message ?: t.javaClass.simpleName)
         cleanup()
+        camera.setWifiActive(false)
     }
 
     /** Leave Wi-Fi: close the sockets and let Android drop the camera's network. */
@@ -298,6 +306,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         job?.cancel()
         job = null
         cleanup()
+        camera.setWifiActive(false)
         _phase.value = WifiPhase.Idle
         _progress.value = null
     }

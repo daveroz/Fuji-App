@@ -63,6 +63,75 @@ class RecipeFlow(private val a: MainActivity) {
         a.choose("Start from", options.map { it.first }, -1) { i -> a.recipesScreen.lab.load(options[i].second) }
     }
 
+    // ---- develop on camera ----
+
+    /** Render the recipe with the camera's own processor, on a RAW it shot. */
+    fun develop(recipe: Recipe) {
+        val problems = recipe.problems()
+        if (problems.isNotEmpty()) {
+            a.showNotice("Can't develop this recipe: ${problems.first()}.")
+            return
+        }
+        if (transfer.busy || a.developer.busy) {
+            a.showNotice("Wait for the current USB job to finish.")
+            return
+        }
+        val dev = a.developer
+        if (dev.raf == null) {
+            explainDevelop { a.pickRawFile { connectAndDevelop(recipe) } }
+            return
+        }
+        a.choose("Develop on camera", listOf("Develop ${dev.rafName}", "Choose another RAW"), -1) { i ->
+            if (i == 0) connectAndDevelop(recipe) else a.pickRawFile { connectAndDevelop(recipe) }
+        }
+    }
+
+    private fun explainDevelop(then: () -> Unit) {
+        MaterialAlertDialogBuilder(a)
+            .setTitle("Develop on camera")
+            .setMessage(
+                "The camera renders the recipe on one of your RAW files with its own processor: exactly what it " +
+                    "would make in the camera. Pick a RAF this camera shot (import it with Photos, or from anywhere on the phone)."
+            )
+            .setPositiveButton("Choose a RAW") { _, _ -> then() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun connectAndDevelop(recipe: Recipe) {
+        val go = {
+            a.developer.develop(recipe)
+            watchDevelop()
+        }
+        if (transfer.cameraPlugged()) go() else usbInstructions("Develop") { go() }
+    }
+
+    private fun watchDevelop() {
+        val dev = a.developer
+        showProgress((dev.state.value as? com.fujiapp.remote.usb.DevelopState.Working)?.message ?: "Working…")
+        a.lifecycleScope.launch {
+            dev.state
+                .takeWhile { it is com.fujiapp.remote.usb.DevelopState.Working || it is com.fujiapp.remote.usb.DevelopState.Idle }
+                .collect { s -> if (s is com.fujiapp.remote.usb.DevelopState.Working) updateProgress(s.message) }
+            dismissProgress()
+            when (val s = dev.state.value) {
+                is com.fujiapp.remote.usb.DevelopState.Done -> {
+                    a.recipesScreen.lab.showDeveloped(s.jpeg, s.recipe)
+                    a.showNotice("Developed by the camera in ${"%.0f".format(s.seconds)} s.", "Save") {
+                        val name = runCatching { dev.saveLast() }.getOrNull()
+                        a.showNotice(if (name != null) "Saved to Pictures/Fuji Remote: $name" else "Couldn't save the picture.")
+                    }
+                }
+                is com.fujiapp.remote.usb.DevelopState.Failed -> MaterialAlertDialogBuilder(a)
+                    .setTitle("Develop on camera")
+                    .setMessage(s.message)
+                    .setPositiveButton("OK", null)
+                    .show()
+                else -> Unit
+            }
+        }
+    }
+
     // ---- reading the slots ----
 
     fun readSlotsOverUsb() {
@@ -75,6 +144,7 @@ class RecipeFlow(private val a: MainActivity) {
     }
 
     private fun startReading() {
+        a.developer.close() // one USB user at a time
         transfer.readSlots()
         watch()
     }
@@ -107,20 +177,31 @@ class RecipeFlow(private val a: MainActivity) {
 
     private fun askBackupFirst(recipe: Recipe, slot: Int, currentName: String?) {
         val what = currentName?.takeIf { it.isNotBlank() }?.let { "C$slot ($it)" } ?: "C$slot"
-        MaterialAlertDialogBuilder(a)
+        // A backup made in the last few minutes already covers this load.
+        val recent = a.session.store.list().firstOrNull()?.takeIf { System.currentTimeMillis() - it.savedAt < RECENT_BACKUP_MS }
+        val time = recent?.let { java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(it.savedAt)) }
+        val b = MaterialAlertDialogBuilder(a)
             .setTitle("Back up first?")
             .setMessage(
                 "Loading \"${recipe.cameraName}\" replaces the settings in $what.\n\n" +
                     "Back up the camera first: a backup holds every setting, all seven slots included, " +
-                    "so you can always go back."
+                    "so you can always go back." +
+                    (recent?.let { "\n\nYou backed up at $time (\"${it.name}\"): that one works too." } ?: "")
             )
             .setPositiveButton("Back up first") { _, _ -> backupThenConnect(recipe, slot) }
-            .setNeutralButton("Load without a backup") { _, _ ->
+            .setNegativeButton("Cancel", null)
+        if (recent != null) {
+            b.setNeutralButton("Use the $time backup") { _, _ ->
+                AppLog.ui("load ${recipe.cameraName} into C$slot with the backup \"${recent.name}\"")
+                usbInstructions("Load", "Your backup from $time is in Backups.") { write(recipe, slot, usbBackup = false) }
+            }
+        } else {
+            b.setNeutralButton("Load without a backup") { _, _ ->
                 AppLog.ui("load ${recipe.cameraName} into C$slot without a backup")
                 usbInstructions("Load") { write(recipe, slot, usbBackup = false) }
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }
+        b.show()
     }
 
     /** Back up over Bluetooth when the camera is connected that way, otherwise over USB just before writing. */
@@ -162,15 +243,18 @@ class RecipeFlow(private val a: MainActivity) {
             "(in its network/USB settings).\n2. Connect the camera to this phone with a USB-C cable.\n" +
             "3. Allow the app to use the camera when Android asks.\n\nWhile it's connected this way the camera's own menus are off. " +
             "Unplug the cable when it's done."
+        // Not dismissed by a tap outside: after a backup this is the step that loads the recipe.
         MaterialAlertDialogBuilder(a)
             .setTitle(if (plugged) "Camera connected by USB" else "Connect by USB")
             .setMessage(listOfNotNull(note, steps).joinToString("\n\n"))
             .setPositiveButton(action) { _, _ -> go() }
             .setNegativeButton("Cancel", null)
+            .setCancelable(false)
             .show()
     }
 
     private fun write(recipe: Recipe, slot: Int, usbBackup: Boolean) {
+        a.developer.close() // one USB user at a time
         transfer.write(slot, recipe, usbBackup)
         watch()
     }
@@ -274,5 +358,9 @@ class RecipeFlow(private val a: MainActivity) {
         progress?.dismiss()
         progress = null
         progressText = null
+    }
+
+    private companion object {
+        const val RECENT_BACKUP_MS = 15 * 60 * 1000L
     }
 }

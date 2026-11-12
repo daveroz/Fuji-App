@@ -20,6 +20,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.IOException
+import java.io.InputStream
 import kotlin.coroutines.resume
 
 /**
@@ -228,6 +229,97 @@ class UsbCamera private constructor(
         return r.data
     }
 
+    // ---- RAW conversion: the camera develops a RAF with a recipe (X RAW Studio's method) ----
+
+    /** Send a RAF into the camera's conversion buffer, streamed from [input] (it can be 80 MB). */
+    fun uploadRaf(size: Long, input: InputStream, progress: (Long) -> Unit) {
+        require(size in 1..Int.MAX_VALUE.toLong() - Ptp.HEADER) { "That file is too large" }
+        val info = transact(SEND_OBJECT_INFO, listOf(0, 0, 0), rafInfo(size))
+        if (info.code != Ptp.OK) throw PtpException(info.code, "Preparing the upload")
+        val sent = transactStream(SEND_OBJECT, size, input, progress)
+        if (sent.code != Ptp.OK) throw PtpException(sent.code, "Uploading the RAW")
+        log("usb: RAF uploaded ($size bytes)")
+    }
+
+    /** ObjectInfo for the upload: format 0xF802 (RAF), the size, the name FUP_FILE.dat, everything else zero. */
+    private fun rafInfo(size: Long): ByteArray {
+        val b = java.nio.ByteBuffer.allocate(64).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        b.putInt(0).putShort(0xF802.toShort()).putShort(0).putInt(size.toInt())
+        b.putShort(0).putInt(0).putInt(0).putInt(0).putInt(0).putInt(0).putInt(0)
+        b.putInt(0).putShort(0).putInt(0).putInt(0)
+        val head = b.array().copyOf(b.position())
+        return head + Ptp.string("FUP_FILE.dat") + byteArrayOf(0, 0, 0)
+    }
+
+    /**
+     * A transaction whose data phase streams [size] bytes from [input]. Every USB transfer but the
+     * last must be a whole number of packets (a short one ends the data phase), so the 12-byte
+     * header goes out with the first data, in full 16 KB buffers.
+     */
+    @Synchronized
+    private fun transactStream(code: Int, size: Long, input: InputStream, progress: (Long) -> Unit): Reply {
+        val tid = ++transaction
+        send(Ptp.command(code, tid), TIMEOUT_MS)
+        val buffer = ByteArray(CHUNK)
+        val header = java.nio.ByteBuffer.wrap(buffer, 0, Ptp.HEADER).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        header.putInt((Ptp.HEADER + size).toInt()).putShort(Ptp.TYPE_DATA.toShort()).putShort(code.toShort()).putInt(tid)
+        var fill = Ptp.HEADER
+        var sent = 0L
+        var total = 0L
+        while (true) {
+            while (fill < buffer.size && sent < size) {
+                val n = input.read(buffer, fill, minOf(buffer.size - fill.toLong(), size - sent).toInt())
+                if (n < 0) throw IOException("The file ended early")
+                fill += n
+                sent += n
+            }
+            if (fill == 0) break
+            var off = 0
+            while (off < fill) {
+                val w = connection.bulkTransfer(bulkOut, buffer, off, fill - off, UPLOAD_TIMEOUT_MS)
+                if (w < 0) throw IOException("USB upload stopped at $sent of $size bytes")
+                off += w
+            }
+            total += fill
+            progress(sent)
+            fill = 0
+            if (sent >= size) break
+        }
+        if (total % bulkOut.maxPacketSize == 0L) connection.bulkTransfer(bulkOut, ByteArray(0), 0, TIMEOUT_MS)
+        while (true) {
+            val c = receive(TIMEOUT_MS)
+            if (c.type == Ptp.TYPE_RESPONSE) return Reply(c.code, c.params, c.payload)
+        }
+    }
+
+    /** The conversion profile for the RAF in the buffer (only readable after an upload). */
+    fun conversionProfile(): ByteArray {
+        val r = transact(Ptp.GET_DEVICE_PROP_VALUE, listOf(CONVERSION_PROFILE))
+        if (r.code != Ptp.OK) throw PtpException(r.code, "Reading the conversion profile")
+        return r.data
+    }
+
+    fun setConversionProfile(profile: ByteArray): Int = transact(Ptp.SET_DEVICE_PROP_VALUE, listOf(CONVERSION_PROFILE), profile).code
+
+    /** Start developing: [full] resolution, or a reduced-size JPEG (half the linear size). */
+    fun startConversion(full: Boolean): Int = setU16(START_CONVERSION, if (full) 1 else 0)
+
+    fun objectHandles(): List<Int> {
+        val r = transact(GET_OBJECT_HANDLES, listOf(-1, 0, 0))
+        if (r.code != Ptp.OK || r.data.size < 4) return emptyList()
+        val b = java.nio.ByteBuffer.wrap(r.data).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        val n = b.int
+        return (0 until n).mapNotNull { if (b.remaining() >= 4) b.int else null }
+    }
+
+    fun getObject(handle: Int): ByteArray {
+        val r = transact(Ptp.GET_OBJECT, listOf(handle), timeoutMs = BACKUP_TIMEOUT_MS)
+        if (r.code != Ptp.OK) throw PtpException(r.code, "Downloading the developed picture")
+        return r.data
+    }
+
+    fun deleteObject(handle: Int): Int = transact(DELETE_OBJECT, listOf(handle, 0)).code
+
     override fun close() {
         if (sessionOpen) runCatching { transact(Ptp.CLOSE_SESSION) }
         sessionOpen = false
@@ -244,6 +336,13 @@ class UsbCamera private constructor(
         private const val BACKUP_TIMEOUT_MS = 20_000
         private const val SELECT_SETTLE_MS = 60L
         private const val ACTION_PERMISSION = "com.fujiapp.remote.USB_PERMISSION"
+        private const val UPLOAD_TIMEOUT_MS = 15_000
+        private const val SEND_OBJECT_INFO = 0x900C
+        private const val SEND_OBJECT = 0x900D
+        private const val GET_OBJECT_HANDLES = 0x1007
+        private const val DELETE_OBJECT = 0x100B
+        private const val CONVERSION_PROFILE = 0xD185
+        private const val START_CONVERSION = 0xD183
 
         /** A Fujifilm camera plugged into the phone, if there is one. */
         fun find(manager: UsbManager): UsbDevice? = manager.deviceList.values.firstOrNull { it.vendorId == FUJIFILM_VENDOR }

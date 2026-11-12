@@ -50,6 +50,8 @@ class LabScreen(private val a: MainActivity) {
     private var rendered: Bitmap? = null
     private var scopeBitmap: Bitmap? = null
     private var showingOriginal = false
+    /** The camera's own rendering of the recipe on a RAW, while it's showing. */
+    private var developed: Bitmap? = null
     private var showScope = true
     private var renderJob: Job? = null
     private var updating = false
@@ -129,9 +131,13 @@ class LabScreen(private val a: MainActivity) {
         setPadding(m, Deco.dpi(c, 10), m, Deco.dpi(c, 10))
         addView(Kit.row(c).apply {
             addView(name, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 8) })
-            addView(small("Photo") { a.pickLabPhoto() })
-            addView(small("Chart") { useSample() })
+            addView(small("Picture") {
+                a.choose("Picture", listOf("Color chart with skin tones", "A photo from the phone"), -1) { i ->
+                    if (i == 0) useSample() else a.pickLabPhoto()
+                }
+            })
             addView(small("Start") { a.recipeFlow.chooseStart() })
+            addView(small("Camera") { a.recipeFlow.develop(recipe) })
         })
         addView(FrameLayout(c).apply {
             background = Deco.glass(c, 16f)
@@ -161,11 +167,15 @@ class LabScreen(private val a: MainActivity) {
     init {
         image.setOnTouchListener { v, e ->
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { showingOriginal = true; image.setImageBitmap(original); status.text = "Original" }
+                MotionEvent.ACTION_DOWN -> {
+                    showingOriginal = true
+                    image.setImageBitmap(if (developed != null) rendered else original)
+                    status.text = if (developed != null) "Phone preview" else "Original"
+                }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     showingOriginal = false
-                    image.setImageBitmap(rendered)
-                    status.text = "Hold to compare"
+                    image.setImageBitmap(developed ?: rendered)
+                    status.text = if (developed != null) "Developed by the camera · hold for the phone preview" else "Hold to compare"
                     if (e.actionMasked == MotionEvent.ACTION_UP) v.performClick()
                 }
             }
@@ -212,8 +222,38 @@ class LabScreen(private val a: MainActivity) {
 
     private fun change(r: Recipe) {
         recipe = r
+        developed = null // a changed recipe needs a new development
         show()
         requestRender()
+    }
+
+    /** Show the camera's own rendering of [r] (a JPEG it developed from a RAW), with its vectorscope. */
+    fun showDeveloped(jpeg: ByteArray, r: Recipe) {
+        a.lifecycleScope.launch {
+            val (bmp, scopePixels) = withContext(Dispatchers.Default) {
+                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
+                var sample = 1
+                while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= DEVELOPED_MAX) sample *= 2
+                val b = android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+                    ?: return@withContext null to null
+                val px = IntArray(b.width * b.height).also { b.getPixels(it, 0, b.width, 0, 0, b.width, b.height) }
+                b to IntArray(SCOPE * SCOPE).also { Vectorscope.render(px, SCOPE, it) }
+            }
+            if (bmp == null) {
+                a.showNotice("Couldn't show the developed picture.")
+                return@launch
+            }
+            developed = bmp
+            if (recipe != r) { recipe = r.copy(name = r.cameraName); show() }
+            image.setImageBitmap(bmp)
+            status.text = "Developed by the camera · hold for the phone preview"
+            val target = scopeBitmap
+            if (scopePixels != null && target != null && showScope) {
+                target.setPixels(scopePixels, 0, SCOPE, 0, 0, SCOPE, SCOPE)
+                scope.setImageBitmap(target)
+            }
+        }
     }
 
     /** Put the recipe's values into the controls. */
@@ -251,6 +291,7 @@ class LabScreen(private val a: MainActivity) {
     }
 
     private fun setPicture(load: () -> Triple<Int, Int, IntArray>) {
+        developed = null
         a.lifecycleScope.launch {
             status.text = "Preparing…"
             val (src, orig) = withContext(Dispatchers.Default) {
@@ -279,18 +320,20 @@ class LabScreen(private val a: MainActivity) {
                 px to if (withScope) IntArray(SCOPE * SCOPE).also { Vectorscope.render(px, SCOPE, it) } else null
             }
             target.setPixels(out, 0, src.width, 0, 0, src.width, src.height)
-            if (!showingOriginal) image.setImageBitmap(target)
+            if (!showingOriginal && developed == null) image.setImageBitmap(target)
             image.invalidate()
             if (scopePixels != null && scopeTarget != null) {
                 scopeTarget.setPixels(scopePixels, 0, SCOPE, 0, 0, SCOPE, SCOPE)
                 scope.setImageBitmap(scopeTarget)
                 scope.invalidate()
             }
-            status.text = "Hold to compare"
+            if (developed == null) status.text = "Hold to compare"
         }
     }
 
     companion object {
+        /** Longest side the camera's developed JPEG is shown at. */
+        private const val DEVELOPED_MAX = 1400
         const val SAMPLE_W = 900
         const val SAMPLE_H = 600
         /** Longest side a photo is scaled to for the preview. */

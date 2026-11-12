@@ -46,14 +46,23 @@ class FujiWifi private constructor(
         output = s.getOutputStream()
     }
 
-    /** Init, OpenSession. A camera just woken by Bluetooth sometimes ignores the first init: retry on a new socket. */
-    private fun handshake(name: String) {
+    /**
+     * Init, OpenSession. After a Bluetooth wake the camera can hold the init's answer until someone
+     * presses OK on its screen (libfuji: "Waiting on the camera… Make sure you pressed OK"), and it
+     * drops its Wi-Fi about 45 s after starting it. So the first init waits up to 40 s while the user
+     * is asked to press OK; a silent socket then gets one fresh try, as XApp does.
+     */
+    private fun handshake(name: String, onWaiting: () -> Unit) {
         var lastError: Throwable? = null
-        for (attempt in 1..3) {
+        for (attempt in 1..2) {
             try {
                 open()
+                socket?.soTimeout = if (attempt == 1) FIRST_INIT_TIMEOUT_MS else RETRY_INIT_TIMEOUT_MS
                 write(initPacket(name))
+                log("wifi: init sent (attempt $attempt), waiting for the camera")
+                onWaiting()
                 val reply = readPacket()
+                socket?.soTimeout = READ_TIMEOUT_MS
                 val type = if (reply.size >= 8) u32(reply, 4) else 0
                 if (type == INIT_FAIL) throw IOException("The camera refused the connection")
                 log("wifi: init ack (type $type)")
@@ -65,7 +74,7 @@ class FujiWifi private constructor(
                 Thread.sleep(600)
             }
         }
-        lastError?.let { throw IOException("The camera didn't answer on Wi-Fi (${it.message}).", it) }
+        lastError?.let { throw IOException("The camera didn't answer on Wi-Fi. Press OK on the camera when it asks, then try again (${it.message}).", it) }
         Thread.sleep(SETTLE_MS) // OpenSession inside this window gets silence
         val r = transact(Ptp.OPEN_SESSION, listOf(1))
         if (!r.ok && r.code != Ptp.SESSION_ALREADY_OPEN) throw PtpException(r.code, "Open session")
@@ -318,6 +327,8 @@ class FujiWifi private constructor(
         const val VIDEO_PORT = 55742
         private const val CONNECT_TIMEOUT_MS = 8_000
         private const val READ_TIMEOUT_MS = 30_000
+        private const val FIRST_INIT_TIMEOUT_MS = 40_000
+        private const val RETRY_INIT_TIMEOUT_MS = 12_000
         private const val SETTLE_MS = 60L
         private const val MAX_PACKET = 64 * 1024 * 1024
         private const val WINDOW = 1024 * 1024
@@ -369,11 +380,11 @@ class FujiWifi private constructor(
         const val MODE_LIVE_VIEW_XAPP = 22
         const val STATE_REMOTE_ACCESS = 6
 
-        /** Connect over [factory] (the camera's Wi-Fi network) and open a session. */
-        fun connect(factory: SocketFactory, name: String, log: (String) -> Unit): FujiWifi =
+        /** Connect over [factory] (the camera's Wi-Fi network) and open a session; [onWaiting] while the camera may want OK. */
+        fun connect(factory: SocketFactory, name: String, log: (String) -> Unit, onWaiting: () -> Unit = {}): FujiWifi =
             FujiWifi(factory, log).also {
                 try {
-                    it.handshake(name)
+                    it.handshake(name, onWaiting)
                 } catch (t: Throwable) {
                     it.close()
                     throw t

@@ -56,6 +56,8 @@ class MainActivity : AppCompatActivity() {
     val myRecipes: com.fujiapp.remote.recipe.MyRecipes get() = (application as App).myRecipes
     val recipeFlow: RecipeFlow by lazy { RecipeFlow(this) }
     val wifi: com.fujiapp.remote.wifi.WifiSession get() = (application as App).wifi
+    val developer: com.fujiapp.remote.usb.RawDeveloper get() = (application as App).developer
+    private var afterRaf: (() -> Unit)? = null
 
     /** What the Camera tab shows while connected: its status, or a Wi-Fi page. */
     enum class CameraPage { STATUS, PHOTOS, REMOTE }
@@ -120,6 +122,25 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
             if (uri != null) loadLabPhoto(uri)
         }
+
+    /** A RAW (RAF) to develop on the camera. */
+    private val pickRaf =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            val then = afterRaf
+            afterRaf = null
+            if (uri == null) return@registerForActivityResult
+            developer.useRaf(uri)
+            if (!developer.rafName.endsWith(".raf", ignoreCase = true)) {
+                showNotice("Pick a RAW file (.RAF) this camera shot.")
+                return@registerForActivityResult
+            }
+            then?.invoke()
+        }
+
+    fun pickRawFile(then: () -> Unit) {
+        afterRaf = then
+        pickRaf.launch(arrayOf("image/x-fuji-raf", "image/*", "application/octet-stream"))
+    }
 
     /** Saving the log on Android 9 and lower: the user picks where. */
     private val createLogFile =
@@ -310,10 +331,11 @@ class MainActivity : AppCompatActivity() {
         statusText.text = label
 
         val view = when (tab) {
+            // A Wi-Fi page stays up while Bluetooth is down: the camera closes Bluetooth for Wi-Fi.
             Tab.CAMERA -> when {
-                connected == null -> connectScreen.view
                 cameraPage == CameraPage.PHOTOS -> photosScreen.view
                 cameraPage == CameraPage.REMOTE -> remoteScreen.view
+                connected == null -> connectScreen.view
                 else -> statusScreen.view
             }
             Tab.RECIPES -> recipesScreen.view
@@ -328,9 +350,9 @@ class MainActivity : AppCompatActivity() {
         }
         when (tab) {
             Tab.CAMERA -> when {
-                connected == null -> connectScreen.render(state)
                 cameraPage == CameraPage.PHOTOS -> photosScreen.render()
                 cameraPage == CameraPage.REMOTE -> remoteScreen.render()
+                connected == null -> connectScreen.render(state)
                 else -> statusScreen.render(connected, session.vitals.value)
             }
             Tab.RECIPES -> recipesScreen.render(state, session.recipes.value, session.vitals.value)

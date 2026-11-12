@@ -69,12 +69,29 @@ What's possible, and how:
 > the camera's limited warranty ([Fuji X Weekly, 2026-06-08](https://fujixweekly.com/2026/06/08/your-cameras-warranty-might-be-voided/)).
 > That covers this app, XApp alternatives and every recipe uploader. Laws differ by country.
 
+### Develop on camera
+
+In the Lab, **Camera** renders the recipe on one of your RAW files with the camera's own
+processor: exactly what the camera would make, not the phone's approximation. Pick a RAF this
+camera shot (import it with Photos, or from anywhere on the phone), connect the camera by USB in
+**USB RAW CONV./BACKUP RESTORE**, and the developed picture replaces the preview (hold it to see
+the phone's approximation next to it; the vectorscope follows the camera's picture). Change the
+recipe and develop again: the RAF is uploaded once, and each version takes a few seconds. **Save**
+keeps the camera's JPEG in Pictures/Fuji Remote.
+
+This is X RAW Studio's method: upload the RAF, patch the conversion profile (`0xD185`) with the
+recipe, start a reduced-size conversion (`0xD183 = 0`) and fetch the JPEG. A conversion that
+doesn't finish within 40 seconds can leave the camera stuck until it's switched off and on (with
+the battery out if it won't switch off); the app never starts another on top of it.
+
 ### Photos and remote over Wi-Fi
 
 **Photos** and **Remote** on the Camera tab work like XApp's: the app asks the camera over
 Bluetooth to start its Wi-Fi, reads the network's name and password, and joins it for this app
 only (Android asks you to confirm; the phone keeps its normal connection for everything else).
-Then press **OK** on the camera to allow the connection.
+Then press **OK** on the camera to allow the connection: the camera waits for it before it
+answers, and gives up its Wi-Fi about 45 seconds after starting it. The camera closes Bluetooth
+while its Wi-Fi is on; the app reconnects Bluetooth when you close Photos or Remote.
 
 - **Photos** lists the card, newest first, with the camera's own thumbnails. Select pictures and
   import them, or import the newest ten; they land in **Pictures/Fuji Remote** (RAW and video in
@@ -273,7 +290,8 @@ app/src/main/java/com/fujiapp/remote/
   the original Fujifilm BLE reverse-engineering
 - FUJIFILM Camera Remote 4.10.2: characteristic names and value formats for camera information
 - [`zgrimz/fujifilm-ptp-reference`](https://github.com/zgrimz/fujifilm-ptp-reference) (CC BY 4.0): the
-  USB custom-slot properties, their encodings, the write order and refusal rules, and the USB backup
+  USB custom-slot properties, their encodings, the write order and refusal rules, the USB backup, and
+  in-camera RAW conversion with the `0xD185` profile layout
 - [`p5k369/grawji`](https://github.com/p5k369/grawji): that older bodies' settings backups carry a
   16-bit checksum the camera checks on restore (not found in the X100VI's; nothing copied)
 - The recipes are this app's own, written after studying each film stock's and film's color
