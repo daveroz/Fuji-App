@@ -105,3 +105,37 @@ class DownloadWindowTest {
         assertEquals(100, FujiWifi.keepOf(0, 100, mb, 11_649_721))
     }
 }
+
+class X100viObjectInfoTest {
+    /** The head of an X100VI's ObjectInfo over Wi-Fi (from a log): standard layout, the size at 8. */
+    @Test
+    fun theSizeIsTheStandardField() {
+        val head = "01 00 00 10 01 38 00 00 ee a6 91 01 01 b9 42 8a 00 00 80 02 00 00 e0 01 00 00 30 1e 00 00 20 14 00 00"
+            .split(" ").map { it.toInt(16).toByte() }.toByteArray()
+        val d = ByteArray(120)
+        head.copyInto(d)
+        Ptp.string("SRGC2157.JPG").copyInto(d, 52)
+        val p = FujiWifi.objectInfo(6, d)!!
+        assertEquals("SRGC2157.JPG", p.name)
+        assertEquals(0x0191A6EEL, p.size) // 26.3 MB, not the 9 MB read from offset 13
+    }
+
+    @Test
+    fun deviceInfoListsEachSetting() {
+        // Two entries: D001 (UINT16, enum of 3) and 5012 (UINT16, enum of 3).
+        fun entry(code: Int, current: Int, values: List<Int>): ByteArray {
+            val desc = ByteBuffer.allocate(2 + 2 + 1 + 2 + 2 + 1 + 2 + 2 * values.size).order(ByteOrder.LITTLE_ENDIAN)
+                .putShort(code.toShort()).putShort(4).put(1).putShort(0).putShort(current.toShort()).put(2).putShort(values.size.toShort())
+            values.forEach { desc.putShort(it.toShort()) }
+            val body = desc.array()
+            return ByteBuffer.allocate(4 + body.size).order(ByteOrder.LITTLE_ENDIAN).putInt(4 + body.size).put(body).array()
+        }
+        val a = entry(0xD001, 0x11, listOf(1, 0x11, 0x14))
+        val b = entry(0x5012, 0, listOf(0, 2, 4))
+        val all = ByteBuffer.allocate(4 + a.size + b.size).order(ByteOrder.LITTLE_ENDIAN).putInt(2).put(a).put(b).array()
+        val descs = FujiWifi.parseDeviceDescs(all)
+        assertEquals(listOf(1L, 0x11L, 0x14L), descs[0xD001]!!.values)
+        assertEquals(0x11L, descs[0xD001]!!.current)
+        assertEquals(listOf(0L, 2L, 4L), descs[0x5012]!!.values)
+    }
+}

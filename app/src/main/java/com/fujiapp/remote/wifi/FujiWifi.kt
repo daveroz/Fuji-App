@@ -166,11 +166,19 @@ class FujiWifi private constructor(
         get(REMOTE_PHOTO_VIEW)?.let { setRaw(REMOTE_PHOTO_VIEW, it) }
         set16(COMPRESS_SMALL, 0)
         set16(CORRECT_SIZE, 0)
-        runCatching { transact(GET_EXTENSION_INFO, listOf(0x10000001)) }
+        runCatching { transact(GET_EXTENSION_INFO, listOf(0x10000001)) }.getOrNull()?.takeIf { it.ok }?.let {
+            // What the camera says about the current picture's parts (JPEG, RAW): for RAW downloads later.
+            log("wifi: extension info ${it.data.size} bytes: ${it.data.take(160).joinToString(" ") { b -> "%02x".format(b) }}")
+        }
         runCatching { transact(GET_EXTENSION_THUMB, listOf(0x10000001)) }
         runCatching { transact(GET_FOLDERS) }
         get(UNKNOWN_D22B)
         runCatching { transact(GET_DATES, listOf(0, 30000)) }
+        // XApp filters the card by format (0xD604: JPEG 1, HEIF 2, MOV 4, MP4 8, RAW 16). Ask for RAW
+        // files too, and note the filter so it can be put back.
+        searchFilter = get(SEARCH_FORMAT)?.takeIf { it.size >= 2 }?.let { (it[0].toInt() and 0xFF) or ((it[1].toInt() and 0xFF) shl 8) }
+        log("wifi: format filter ${searchFilter?.let { "0x%X".format(it) } ?: "not offered"}")
+        searchFilter?.let { f -> if (f and RAW_FILES == 0) log("wifi: listing RAW files too -> ${if (set16(SEARCH_FORMAT, f or RAW_FILES)) "OK" else "refused"}") }
         get(IMPORT_COUNT)
         val d = get(IMPORT_HANDLES) ?: throw IOException("The camera didn't list its pictures.")
         val count = runCatching { events()[OBJECT_COUNT] }.getOrNull()
@@ -207,6 +215,16 @@ class FujiWifi private constructor(
             log("wifi: ObjectInfo #$handle ${r.data.size} bytes: ${r.data.take(64).joinToString(" ") { "%02x".format(it) }}")
         }
         return objectInfo(handle, r.data) ?: run { log("wifi: ObjectInfo #$handle unreadable"); null }
+    }
+
+    /** The camera's own format filter before the app asked for RAW files too. */
+    private var searchFilter: Int? = null
+
+    /** Put the camera's format filter back as it was. */
+    fun restoreFilter() {
+        val f = searchFilter ?: return
+        searchFilter = null
+        if (f and RAW_FILES == 0) runCatching { set16(SEARCH_FORMAT, f) }
     }
 
     private var propertiesWork = true
@@ -380,6 +398,13 @@ class FujiWifi private constructor(
     /** Let go of the half press. */
     fun releaseFocus(): Int = transact(UNLOCK_S1).code
 
+    /** Every setting the camera offers now, with its allowed values (what XApp's remote lists). */
+    fun deviceDescs(): Map<Int, PropDesc> {
+        val r = transact(FUJI_DEVICE_INFO)
+        if (!r.ok) return emptyMap()
+        return parseDeviceDescs(r.data).also { log("wifi: camera offers ${it.size} settings: ${it.keys.joinToString(",") { k -> "%04X".format(k) }}") }
+    }
+
     /** A property's description: current value and its range or allowed values. */
     fun propDesc(property: Int): PropDesc? {
         val r = transact(GET_DEVICE_PROP_DESC, listOf(property))
@@ -452,6 +477,7 @@ class FujiWifi private constructor(
 
     override fun close() {
         runCatching { socket?.soTimeout = CLOSE_TIMEOUT_MS }
+        if (sessionOpen) restoreFilter()
         runCatching { if (openCaptureTid != 0) transact(TERMINATE_OPEN_CAPTURE, listOf(openCaptureTid)) }
         openCaptureTid = 0
         // Say goodbye: a camera left with an open session takes longer to free its Wi-Fi.
@@ -503,6 +529,7 @@ class FujiWifi private constructor(
         const val STEP_SHUTTER_SPEED = 0x902C
         const val STEP_APERTURE = 0x902D
         const val STEP_EXPOSURE_BIAS = 0x902E
+        const val FUJI_DEVICE_INFO = 0x902B
         const val LOCK_S1 = 0x9026
         const val UNLOCK_S1 = 0x9027
 
@@ -536,6 +563,10 @@ class FujiWifi private constructor(
         const val S1_LOCK_POINT = 0xD17C
         const val OBJECT_COUNT = 0xD222
         const val ORIGINALS = 2
+        const val SEARCH_FORMAT = 0xD604
+        const val RAW_FILES = 16
+        const val MACRO = 0xD01D
+        const val FLASH = 0x500C
         const val EXPOSURE_BIAS = 0x5010
         const val FILM_SIMULATION = 0xD001
         const val WHITE_BALANCE = 0x5005
@@ -611,22 +642,51 @@ class FujiWifi private constructor(
         }
 
         /**
-         * Fujifilm's ObjectInfo over Wi-Fi (packed, as libfuji's `PtpFujiObjectInfo`): format u16 at 4
-         * (0x3001 a folder), the size an unaligned u32 at 13, the file name a PTP string at 52 and the
-         * capture date the string after it.
+         * A picture's ObjectInfo: format u16 at 4 (0x3001 a folder), the file name a PTP string at 52
+         * and the capture date the string after it. The size is the standard aligned u32 at 8, as an
+         * X100VI sends it over Wi-Fi too (its thumbnail and image dimensions sit where standard PTP
+         * puts them); libfuji describes a packed record with the size at 13 for other bodies, used
+         * only when the standard fields don't add up.
          */
         fun objectInfo(handle: Int, d: ByteArray): Photo? {
             if (d.size <= NAME_AT) return null
             if ((d[4].toInt() and 0xFF) or ((d[5].toInt() and 0xFF) shl 8) == 0x3001) return null
             val name = Ptp.readString(d, NAME_AT).substringAfterLast('/').substringAfterLast('\\').trim()
             if (name.isEmpty()) return null
-            val size = u32(d, 13).toLong() and 0xFFFFFFFFL
+            val size = (if (standardLayout(d)) u32(d, 8) else u32(d, 13)).toLong() and 0xFFFFFFFFL
             val dateAt = NAME_AT + 1 + (d[NAME_AT].toInt() and 0xFF) * 2
             val date = Ptp.readString(d, dateAt).takeIf { it.length >= 15 && it[0].isDigit() }
             return Photo(handle, name, size, date)
         }
 
         private const val NAME_AT = 52
+
+        /** Standard ObjectInfo: thumbnail and image width/height at 18/22/26/30 look like pixel sizes. */
+        fun standardLayout(d: ByteArray): Boolean {
+            if (d.size < 34) return false
+            val dims = listOf(18, 22, 26, 30).map { u32(d, it) }
+            return dims.all { it in 1..40_000 } && dims[2] >= dims[0] && dims[3] >= dims[1]
+        }
+
+        /**
+         * Fujifilm's GetDeviceInfo (0x902B), as libfuji reads it: a u32 count, then for each setting a
+         * u32 length and a standard DevicePropDesc, with the values the camera accepts right now.
+         */
+        fun parseDeviceDescs(d: ByteArray): Map<Int, PropDesc> {
+            if (d.size < 4) return emptyMap()
+            val n = u32(d, 0)
+            val out = LinkedHashMap<Int, PropDesc>()
+            var at = 4
+            repeat(n.coerceIn(0, 512)) {
+                if (at + 8 > d.size) return out
+                val len = u32(d, at)
+                if (len < 8 || at + len > d.size) return out
+                val code = (d[at + 4].toInt() and 0xFF) or ((d[at + 5].toInt() and 0xFF) shl 8)
+                parseDesc(d.copyOfRange(at + 4, at + len))?.let { out[code] = it }
+                at += len
+            }
+            return out
+        }
 
         /**
          * Fujifilm's shutter speed (0xD240), as XApp shows it: -1 none; top bits 10 = a fraction,

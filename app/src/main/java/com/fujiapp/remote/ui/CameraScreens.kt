@@ -124,7 +124,7 @@ class StatusScreen(private val a: MainActivity) {
     val view: View = Kit.page(c, Kit.column(c).apply {
         addView(art, Kit.lp(top = Deco.dpi(c, 2)))
         addView(Kit.row(c).apply {
-            addView(tile("Photos", "Browse and import over Wi-Fi") { a.openCameraPage(MainActivity.CameraPage.PHOTOS) }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
+            addView(tile("Photos", "Browse and download over Wi-Fi") { a.openCameraPage(MainActivity.CameraPage.PHOTOS) }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
             addView(tile("Remote", "Live view, exposure, shutter") { a.openCameraPage(MainActivity.CameraPage.REMOTE) }, Kit.lp(0, weight = 1f))
         }, Kit.lp(top = Deco.dpi(c, 14)))
         addView(strip, Kit.lp(top = Deco.dpi(c, 14)))

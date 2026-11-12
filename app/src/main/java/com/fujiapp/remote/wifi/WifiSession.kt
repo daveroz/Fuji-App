@@ -85,6 +85,11 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     /** The remote's last word: a shot taken, a refusal. */
     val note: StateFlow<String?> = _note.asStateFlow()
     private var pollJob: Job? = null
+    /** Every setting the camera offers right now and its allowed values (0x902B, as XApp reads them). */
+    private var descs: Map<Int, FujiWifi.PropDesc> = emptyMap()
+
+    /** True when the camera lets [property] be changed now. */
+    fun offers(property: Int): Boolean = descs[property]?.values?.isNotEmpty() == true
     private var eventJob: Job? = null
     /** When the last picture was taken in remote mode. */
     private var lastCapture = 0L
@@ -151,11 +156,11 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         val w = wifi ?: return
         if (selected.isEmpty()) return
         if (importJob?.isActive == true) {
-            _progress.value = "Already importing. Wait for it to finish."
+            _progress.value = "Already downloading. Wait for it to finish."
             return
         }
-        AppLog.ui("wifi: import ${selected.size}")
-        _progress.value = "Importing ${selected.size} ${if (selected.size == 1) "picture" else "pictures"}…"
+        AppLog.ui("wifi: download ${selected.size}")
+        _progress.value = "Downloading ${selected.size} ${if (selected.size == 1) "picture" else "pictures"}…"
         importJob = scope.launch {
             var done = 0
             try {
@@ -165,22 +170,23 @@ class WifiSession(context: Context, private val camera: CameraSession) {
                         withContext(Dispatchers.IO) {
                             save(p) { out ->
                                 w.download(p, { out.write(it) }) { got ->
-                                    _progress.value = "Importing ${p.name} (${done + 1} of ${selected.size}) · ${(got * 100 / maxOf(1, p.size))}%"
+                                    _progress.value = "Downloading ${p.name} (${done + 1} of ${selected.size}) · ${(got * 100 / maxOf(1, p.size))}%"
                                 }
                             }
                         }
                     }
                     markImported(p)
-                    AppLog.add("wifi: imported ${p.name}, $bytes bytes, checked")
+                    AppLog.add("wifi: downloaded ${p.name}, $bytes bytes, checked")
                     done++
                     _photos.value = _photos.value.map { if (it.photo.handle == p.handle) it.copy(imported = true) else it }
                 }
-                _progress.value = "Imported $done ${if (done == 1) "picture" else "pictures"} to Pictures/Fuji Remote."
+                _progress.value = "Downloaded $done ${if (done == 1) "picture" else "pictures"} to Pictures/Fuji Remote."
             } catch (c: CancellationException) {
                 throw c
             } catch (t: Throwable) {
-                AppLog.error("wifi import", t)
-                _progress.value = "Import stopped after $done: ${t.message}"
+                if (wifi !== w) return@launch // the session was closed under it
+                AppLog.error("wifi download", t)
+                _progress.value = "Download stopped after $done: ${t.message}"
             }
         }
     }
@@ -268,7 +274,9 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     fun openRemote() = start(FujiCamera.WIFI_REMOTE, "remote") { w ->
         val view = io.withLock { withContext(Dispatchers.IO) { w.startRemote() } }
         live = view
-        isoChoices = io.withLock { withContext(Dispatchers.IO) { runCatching { w.allowedValues(FujiWifi.ISO) }.getOrDefault(emptyList()) } }
+        descs = io.withLock { withContext(Dispatchers.IO) { runCatching { w.deviceDescs() }.getOrDefault(emptyMap()) } }
+        isoChoices = descs[FujiWifi.ISO]?.values?.takeIf { it.isNotEmpty() }
+            ?: io.withLock { withContext(Dispatchers.IO) { runCatching { w.allowedValues(FujiWifi.ISO) }.getOrDefault(emptyList()) } }
         values.clear()
         _focused.value = false
         _note.value = null
@@ -384,6 +392,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
      */
     suspend fun describeSetting(property: Int): FujiWifi.PropDesc? {
         val w = wifi ?: return null
+        descs[property]?.takeIf { it.values.isNotEmpty() }?.let { return it }
         val desc = io.withLock { withContext(Dispatchers.IO) { runCatching { w.propDesc(property) }.getOrNull() } }
         AppLog.add("remote: %04X offers %s".format(property, desc?.values?.joinToString(",") { "%X".format(it) } ?: "nothing"))
         if (desc != null && desc.values.isNotEmpty()) return desc
@@ -394,8 +403,13 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     /** Change one of the camera's settings (film simulation, white balance, focus mode…). */
     fun setSetting(property: Int, value: Long, width: Int, label: String) = remote("set %04X = %X".format(property, value)) { w ->
         val ok = w.setValue(property, value, width)
-        AppLog.add("wifi: set %04X = %X -> %s".format(property, value, if (ok) "OK" else "refused"))
-        _note.value = if (ok) "$label set." else "The camera kept its setting (a dial or menu may decide it)."
+        // A camera can answer OK and keep its value: read it back, and the settings list again, as XApp does.
+        val now = w.get(property)?.let { d -> when { d.size >= 4 -> FujiWifi.u32(d, 0).toLong() and 0xFFFFFFFFL; d.size >= 2 -> (FujiProtocol.u16(d) ?: 0).toLong(); else -> null } }
+        now?.let { values[property] = it }
+        descs = runCatching { w.deviceDescs() }.getOrDefault(descs)
+        val applied = ok && (now == null || now == value)
+        AppLog.add("wifi: set %04X = %X -> %s, now %s".format(property, value, if (ok) "OK" else "refused", now?.let { "%X".format(it) } ?: "?"))
+        _note.value = if (applied) "$label: ${settingName(property, value)}." else "The camera kept its $label. It may be set by a custom setting (C1–C7) or a dial."
     }
     private var loggedEvents = false
 
@@ -607,16 +621,18 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         private val KNOWN_VALUES: Map<Int, List<Long>> = mapOf(
             FujiWifi.FILM_SIMULATION to com.fujiapp.remote.recipe.FilmSim.entries.map { it.code.toLong() },
             FujiWifi.WHITE_BALANCE to listOf(0x0002L, 0x0004L, 0x8006L, 0x8001L, 0x8002L, 0x8003L, 0x0006L, 0x0008L),
-            FujiWifi.IMAGE_QUALITY to listOf(2L, 3L, 1L, 4L, 5L),
-            FujiWifi.SELF_TIMER to listOf(0L, 2_000L, 10_000L),
-            FujiWifi.FOCUS_MODE to listOf(0x8001L, 0x8002L, 1L),
+            // CaptureDelay as libfuji reads it: 0 off, 2 = 2 s, 4 = 10 s.
+            FujiWifi.SELF_TIMER to listOf(0L, 2L, 4L),
         )
-        private val KNOWN_WIDTHS = mapOf(FujiWifi.SELF_TIMER to 4)
+        private val KNOWN_WIDTHS = emptyMap<Int, Int>()
+
+        /** The value's name as the Remote screen shows it. */
+        fun settingName(property: Int, v: Long): String = com.fujiapp.remote.ui.settingLabel(property, v)
 
         private val SHOWN = listOf(
             FujiWifi.SHUTTER_SPEED, FujiWifi.EXPOSURE_TIME, FujiWifi.F_NUMBER, FujiWifi.ISO,
             FujiWifi.EXPOSURE_BIAS, FujiWifi.SHOOTING_MODE, FujiWifi.BATTERY_LEVELS, FujiWifi.BATTERY,
-            FujiWifi.FILM_SIMULATION, FujiWifi.WHITE_BALANCE, FujiWifi.FOCUS_MODE, FujiWifi.IMAGE_QUALITY, FujiWifi.SELF_TIMER,
+            FujiWifi.FILM_SIMULATION, FujiWifi.WHITE_BALANCE, FujiWifi.MACRO, FujiWifi.FLASH, FujiWifi.SELF_TIMER,
         )
     }
 }

@@ -99,17 +99,22 @@ The camera gives up its Wi-Fi about 45 seconds after starting it if nobody conne
 while its Wi-Fi is on; the app reconnects Bluetooth directly when you close Photos or Remote.
 
 - **Photos** lists the card, newest first, with the camera's own thumbnails. Select pictures and
-  import them, or import the newest ten; they land in **Pictures/Fuji Remote** (RAW and video in
+  download them, or download the newest ten; they land in **Pictures/Fuji Remote** (RAW and video in
   Downloads). Every file is checked before it's kept (its full size; a JPEG's end marker), so a
-  broken transfer never lands in your gallery. **Newest 10** skips pictures already imported;
-  choosing a picture imports it again, replacing the earlier copy.
+  broken transfer never lands in your gallery. **Newest 10** skips pictures already downloaded;
+  choosing a picture downloads it again, replacing the earlier copy. RAW files: the app asks the
+  camera to list them too (its format filter, `0xD604`), but an X100VI keeps a RAW+JPEG pair as one
+  picture and hands the RAW part out only through Fujifilm's extension commands, which the app
+  can't use yet: for RAWs, use a card reader or the camera's USB card-reader mode for now.
 - **Remote** fits on one screen: the live view (tap it to focus there), shutter speed, aperture
   and exposure compensation with their current values between − and +, ISO from the camera's own
   list, a **Focus** button (half press and hold; tap again to let go) and the shutter. The values
   follow the camera as its dials turn. A dial set to a value wins: the app shows it but can't
-  change it, and in modes A, S and P the value the camera picks is dimmed. **Settings** changes the
-  camera's film simulation, white balance, focus mode, image quality and self-timer, from the
-  values the camera offers (or the values they're known to take, when the camera doesn't list them).
+  change it, and in modes A, S and P the value the camera picks is dimmed. **Settings** offers what XApp's
+  remote offers: film simulation, white balance, macro, flash and self-timer, each from the values
+  the camera accepts at that moment (Fujifilm's settings list, `0x902B`, as XApp reads it). A
+  setting the camera doesn't offer (film simulation while a custom setting decides it, say) isn't
+  listed, and every change is read back.
   Tapping the live view focuses there, on the camera's own focus grid. Closing waits for a picture
   just taken to finish and ends the session properly before Android drops the camera's network.
 
@@ -231,7 +236,8 @@ every write is a write with response. Every UUID, with its source, is in
   then name/size/date through `GetObjectPropValue` (`0xDC07`/`0xDC04`/`0xDC08`); an X100VI answers
   those with "parameter not supported", so the app falls back to `GetObjectInfo` with `0xD227 = 1`
   (Fujifilm's packed layout: size an unaligned u32 at 13, name at 52). Thumbnails `GetThumb`, files
-  `GetPartialObject` in 1 MB windows, each right after that picture's `GetObjectInfo`: otherwise an
+  `GetPartialObject` in 1 MB windows, each right after that picture's `GetObjectInfo` (standard
+  layout on an X100VI over Wi-Fi too: the size is at 8): otherwise an
   X100VI never answers `GetThumb` (as libfuji notes for newer bodies). Remote: `0xDF00 = 6`, `0xDF01 = 22`, `InitiateOpenCapture`, the
   live view on port 55742 (18-byte header + JPEG per frame), the step operations
   `0x902C`/`0x902D`/`0x902E`, the event list polled every 0.6 s. Shutter speed is `0xD240` (top bits

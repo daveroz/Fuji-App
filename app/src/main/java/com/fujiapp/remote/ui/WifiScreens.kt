@@ -15,7 +15,7 @@ import com.fujiapp.remote.wifi.FujiWifi
 import com.fujiapp.remote.wifi.WifiPhase
 import kotlinx.coroutines.launch
 
-/** Browse the card and import pictures, over the camera's Wi-Fi. */
+/** Browse the card and download pictures, over the camera's Wi-Fi. */
 class PhotosScreen(private val a: MainActivity) {
     private val c = a
     private val status = Kit.text(c, null, 14f, Deco.MUTED)
@@ -24,7 +24,7 @@ class PhotosScreen(private val a: MainActivity) {
     private val selected = LinkedHashSet<Int>()
     // Chosen pictures are imported even if they were before (a damaged copy can be replaced);
     // "Newest 10" skips the ones already on the phone.
-    private val importSelected = Kit.button(c, "Import selected") { importNow(selectedPhotos(), again = true) }
+    private val importSelected = Kit.button(c, "Download selected") { importNow(selectedPhotos(), again = true) }
     private val importNewest = Kit.button(c, "Newest 10", Kit.Style.SECONDARY) { importNow(a.wifi.photos.value.take(10).map { it.photo }, again = false) }
     private val more = Kit.button(c, "Load more", Kit.Style.QUIET) { a.wifi.loadMore() }
     private var shown: List<CardPhoto>? = null
@@ -74,7 +74,7 @@ class PhotosScreen(private val a: MainActivity) {
         status.setTextColor(if (phase is WifiPhase.Failed) Deco.RED else Deco.MUTED)
         val ready = phase == WifiPhase.Photos
         Kit.setEnabled(importSelected, ready && selected.isNotEmpty())
-        importSelected.text = if (selected.isEmpty()) "Import selected" else "Import ${selected.size}"
+        importSelected.text = if (selected.isEmpty()) "Download selected" else "Download ${selected.size}"
         Kit.setEnabled(importNewest, ready && w.photos.value.isNotEmpty())
         more.visibility = if (ready && w.canLoadMore) View.VISIBLE else View.GONE
         val list = w.photos.value
@@ -160,18 +160,22 @@ class RemoteScreen(private val a: MainActivity) {
     private val apertureRow = stepper("Aperture", apertureValue, { a.wifi.stepAperture(false) }, { a.wifi.stepAperture(true) })
 
     /** The camera's own settings, as XApp's remote offers them. */
+    /** The settings XApp's remote offers (besides exposure and ISO), in its order. */
     private val settings = listOf(
         FujiWifi.FILM_SIMULATION to "Film simulation",
         FujiWifi.WHITE_BALANCE to "White balance",
-        FujiWifi.FOCUS_MODE to "Focus mode",
-        FujiWifi.IMAGE_QUALITY to "Image quality",
+        FujiWifi.MACRO to "Macro",
+        FujiWifi.FLASH to "Flash",
         FujiWifi.SELF_TIMER to "Self-timer",
     )
 
     private fun openSettings() {
         if (a.wifi.phase.value != WifiPhase.Remote) return
-        val items = settings.map { (p, title) -> "$title: ${a.wifi.currentValue(p)?.let { settingLabel(p, it) } ?: "—"}" }
-        a.choose("Camera settings", items, -1) { i -> pickSetting(settings[i].first, settings[i].second) }
+        // As XApp: only what the camera offers right now (film simulation, for one, isn't offered
+        // while a custom setting decides it).
+        val shown = settings.filter { (p, _) -> a.wifi.offers(p) }.ifEmpty { settings.filter { (p, _) -> p == FujiWifi.FILM_SIMULATION || p == FujiWifi.WHITE_BALANCE || p == FujiWifi.SELF_TIMER } }
+        val items = shown.map { (p, title) -> "$title: ${a.wifi.currentValue(p)?.let { settingLabel(p, it) } ?: "—"}" }
+        a.choose("Camera settings", items, -1) { i -> pickSetting(shown[i].first, shown[i].second) }
     }
 
     private fun pickSetting(property: Int, title: String) {
@@ -376,9 +380,22 @@ internal fun settingLabel(property: Int, v: Long): String = when (property) {
         5L -> "RAW + Normal"
         else -> null
     }
-    FujiWifi.SELF_TIMER -> when {
-        v == 0L -> "Off"
-        v % 1000 == 0L -> "${v / 1000} s"
+    FujiWifi.SELF_TIMER -> when (v) {
+        0L -> "Off"
+        2L -> "2 s"
+        4L -> "10 s"
+        else -> null
+    }
+    FujiWifi.FLASH -> when (v) {
+        1L -> "Auto"
+        2L -> "Off"
+        3L -> "Fill flash"
+        4L -> "Red-eye, auto"
+        5L -> "Red-eye, fill"
+        else -> null
+    }
+    FujiWifi.MACRO -> when (v) {
+        0L, 1L -> if (v == 1L) "On" else "Off"
         else -> null
     }
     else -> null
