@@ -2,33 +2,51 @@
 <resources>
     <string name="app_name">Fuji Remote</string>
 
-    <string name="connect">Connect to camera</string>
-    <string name="disconnect">Disconnect</string>
-    <string name="live_view">Live view &amp; remote</string>
-    <string name="recipes_title">Film recipes</string>
-
-    <string name="status_disconnected">Not connected</string>
+    <!-- Main -->
     <string name="howto_title">Before you connect</string>
-    <string name="howto_body">1. On the camera, start the wireless connection / remote mode.\n2. On your phone, join the camera’s WiFi network (Settings ▸ WiFi).\n3. Tap Connect, then press OK on the camera when it asks.</string>
+    <string name="howto_body">First time: on the camera, open PAIRING REGISTRATION in its Bluetooth / smartphone settings, then tap Find camera here and pick it. Confirm the six-digit code on the camera (MENU/OK) and on the phone.\n\nAfter that, tap your paired camera below and switch the camera on.</string>
+    <string name="find_camera">Find camera</string>
+    <string name="stop_searching">Stop searching</string>
+    <string name="search_again">Search again</string>
+    <string name="status_idle">Not connected</string>
+    <string name="status_searching">Searching for Fujifilm cameras…</string>
+    <string name="status_search_done">Search finished. Tap a camera, or search again.</string>
+    <string name="status_connected">Connected to %1$s</string>
+    <string name="paired_cameras">Paired cameras</string>
+    <string name="found_cameras">Cameras nearby</string>
+    <string name="none_found">No camera found yet. Is it in PAIRING REGISTRATION, or just switched on?</string>
+    <string name="camera_info">Camera info</string>
+    <string name="backups">Backups &amp; recipes</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="share_log">Share Bluetooth log</string>
+    <string name="cam_paired">Paired with this phone · tap to connect</string>
+    <string name="cam_paired_wait">Paired · tap, then switch the camera on</string>
+    <string name="cam_pairing_mode">Ready to pair · tap to pair</string>
+    <string name="cam_not_pairing">Not in pairing mode · start PAIRING REGISTRATION on the camera</string>
+    <string name="cam_legacy">Older Bluetooth firmware · update the camera firmware</string>
+    <string name="toast_legacy">This camera uses the older Bluetooth pairing. Update the camera firmware first.</string>
+    <string name="permission_needed">The app needs the Nearby devices (Bluetooth) permission to find your camera.</string>
+    <string name="bluetooth_off">Turn Bluetooth on, then try again.</string>
 
-    <string name="shutter">Shutter</string>
-    <string name="capture">Capture</string>
-    <string name="shutter_up">Shutter +</string>
-    <string name="shutter_down">Shutter −</string>
-    <string name="aperture_up">Aperture +</string>
-    <string name="aperture_down">Aperture −</string>
-    <string name="ev_up">EV +</string>
-    <string name="ev_down">EV −</string>
-    <string name="start_live">Start live view</string>
-    <string name="stop_live">Stop live view</string>
+    <!-- Camera info -->
+    <string name="refresh">Refresh</string>
+    <string name="not_connected_hint">Connect to the camera first.</string>
+    <string name="shutter_count_title">Shutter count</string>
+    <string name="shutter_count_pending">Not available in this version yet. The camera sends its shutter and usage counters over Bluetooth, but the request that asks for them isn\'t publicly documented. Support will be added once it is confirmed.</string>
 
-    <string name="backup_current">Back up current look</string>
-    <string name="no_recipes">No saved recipes yet. Connect to the camera and back up its current look.</string>
-    <string name="restore">Apply to camera</string>
+    <!-- Backups -->
+    <string name="backups_intro">A backup is the camera\'s own settings file. It holds every setting, including your C1–C7 custom settings with your film-simulation recipes.</string>
+    <string name="restore_pending">Restoring a backup to the camera over Bluetooth isn\'t available in this version yet.</string>
+    <string name="backup_now">Back up camera settings</string>
+    <string name="backup_name_hint">Backup name</string>
+    <string name="backup_running">Receiving backup… %1$s</string>
+    <string name="backup_done">Saved \"%1$s\" (%2$s)</string>
+    <string name="backup_failed">Backup failed: %1$s</string>
+    <string name="backup_unsupported">This camera doesn\'t offer a settings backup over Bluetooth.</string>
+    <string name="no_backups">No backups yet. Connect to the camera and back up its settings.</string>
     <string name="share">Share</string>
     <string name="delete">Delete</string>
-    <string name="recipe_name_hint">Recipe name</string>
+    <string name="delete_confirm">Delete this backup from the phone?</string>
     <string name="save">Save</string>
     <string name="cancel">Cancel</string>
-    <string name="not_connected_hint">Connect to the camera first.</string>
 </resources>
