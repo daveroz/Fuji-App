@@ -359,12 +359,21 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
     suspend fun wakeWifi(function: Int): CameraWifi {
         if (!gatt.has(FujiGatt.FUNCTION_LAUNCH)) throw UnsupportedCameraException("This camera can't start its Wi-Fi from Bluetooth.")
         val ssid = FujiProtocol.string(gatt.read(FujiGatt.CAMERA_NAME))?.trim().orEmpty()
+        if (ssid.isEmpty()) throw GattException("The camera didn't give its Wi-Fi name.")
         gatt.drain(FujiGatt.AP_STATE)
         gatt.write(FujiGatt.FUNCTION_LAUNCH, FujiProtocol.le16(function))
         val password = runCatching { FujiProtocol.string(gatt.read(FujiGatt.WIFI_PASSWORD, secret = true))?.trim() }.getOrNull().orEmpty()
         var busy = 0
         while (true) {
-            val answer = gatt.awaitValue(FujiGatt.AP_STATE, WIFI_ANSWER_MS)
+            val answer = try {
+                gatt.awaitValue(FujiGatt.AP_STATE, WIFI_ANSWER_MS)
+            } catch (e: GattException) {
+                // In remote mode the camera can end Bluetooth as its Wi-Fi comes up, before it reports
+                // the AP state: the launch went through, so join with what it already handed over.
+                if (password.isEmpty()) throw GattException("The camera closed Bluetooth before giving its Wi-Fi password. Try again.")
+                log("Wi-Fi: Bluetooth closed by the camera after the launch; joining its Wi-Fi")
+                return CameraWifi(ssid, password)
+            }
             if (answer == null) {
                 log("Wi-Fi: no answer within ${WIFI_ANSWER_MS / 1000} s, trying anyway")
                 break
@@ -376,7 +385,6 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
             delay(200)
             gatt.write(FujiGatt.FUNCTION_LAUNCH, FujiProtocol.le16(function))
         }
-        if (ssid.isEmpty()) throw GattException("The camera didn't give its Wi-Fi name.")
         return CameraWifi(ssid, password)
     }
 

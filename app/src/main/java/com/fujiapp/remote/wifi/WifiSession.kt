@@ -80,7 +80,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     val canLoadMore: Boolean get() = listed < handles.size
 
     fun openPhotos() = start(FujiCamera.WIFI_VIEW_IMAGES, "photos") { w ->
-        handles = w.startGallery()
+        handles = io.withLock { withContext(Dispatchers.IO) { w.startGallery() } }
         AppLog.add("wifi: ${handles.size} pictures on the card")
         listed = 0
         _photos.value = emptyList()
@@ -269,7 +269,11 @@ class WifiSession(context: Context, private val camera: CameraSession) {
                 _phase.value = WifiPhase.Working("Asking the camera to start its Wi-Fi…")
                 // The camera closes Bluetooth once its Wi-Fi is up; reconnecting then would pull it off Wi-Fi.
                 camera.setWifiActive(true)
-                val net = camera.wakeWifi(function)
+                val net = camera.wakeWifi(
+                    function,
+                    onQueued = { _phase.value = WifiPhase.Working("Waiting for the camera to finish over Bluetooth…") },
+                    onStarted = { _phase.value = WifiPhase.Working("Asking the camera to start its Wi-Fi…") },
+                )
                 AppLog.add("wifi: camera network ${net.ssid}")
                 _phase.value = WifiPhase.Working("Joining ${net.ssid}… Allow the connection when Android asks.")
                 val network = join.join(net.ssid, net.password)

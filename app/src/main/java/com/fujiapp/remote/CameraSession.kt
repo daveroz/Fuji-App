@@ -377,7 +377,7 @@ class CameraSession(context: Context) {
                 // Let an operation the user started first finish.
                 withTimeoutOrNull(AUTO_READ_WAIT_MS) { while (opLock.isLocked) delay(250) }
                 val v = _vitals.value
-                if (camera === cam && v !is VitalsState.Loaded && v !is VitalsState.Loading) fetchVitals(user = false)
+                if (camera === cam && !wifiActive.value && v !is VitalsState.Loaded && v !is VitalsState.Loading) fetchVitals(user = false)
             }
         }
         return stored != null && !freshPairing
@@ -694,10 +694,19 @@ class CameraSession(context: Context) {
     }
 
     /** Ask the connected camera to start its Wi-Fi for [function]; its network name and password. */
-    suspend fun wakeWifi(function: Int): FujiCamera.CameraWifi {
-        val cam = camera ?: throw IOException("Connect to the camera over Bluetooth first.")
+    suspend fun wakeWifi(function: Int, onQueued: () -> Unit = {}, onStarted: () -> Unit = {}): FujiCamera.CameraWifi {
+        if (camera == null) throw IOException("Connect to the camera over Bluetooth first.")
         AppLog.add("wifi: wake (function $function)")
-        return opLock.withLock { cam.wakeWifi(function) }
+        if (opLock.isLocked) {
+            // Usually the automatic shutter count read: a few seconds.
+            AppLog.add("wifi: waiting for the current Bluetooth operation")
+            onQueued()
+        }
+        return opLock.withLock {
+            val cam = camera ?: throw IOException("The Bluetooth connection dropped. Try again once it's back.")
+            onStarted()
+            cam.wakeWifi(function)
+        }
     }
 
     /** The slots changed over USB: what was read over Bluetooth is out of date. */

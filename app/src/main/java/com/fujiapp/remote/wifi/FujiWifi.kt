@@ -92,7 +92,10 @@ class FujiWifi private constructor(
             val c = Ptp.parse(readPacket())
             when (c.type) {
                 Ptp.TYPE_DATA -> data = c.payload
-                Ptp.TYPE_RESPONSE -> return Reply(c.code, data)
+                Ptp.TYPE_RESPONSE -> {
+                    if (c.code != Ptp.OK) log("wifi: 0x%04X %s -> %s".format(code, params.joinToString(",") { "0x%X".format(it) }, Ptp.responseName(c.code)))
+                    return Reply(c.code, data)
+                }
                 else -> log("wifi: ignored container type ${c.type}")
             }
         }
@@ -160,6 +163,7 @@ class FujiWifi private constructor(
         runCatching { transact(GET_DATES, listOf(0, 30000)) }
         get(IMPORT_COUNT)
         val d = get(IMPORT_HANDLES) ?: throw IOException("The camera didn't list its pictures.")
+        log("wifi: picture list ${d.size} bytes")
         if (d.size < 4) return emptyList()
         val n = u32(d, 0)
         if (n <= 0 || d.size < 4 + n * 4) return emptyList()
