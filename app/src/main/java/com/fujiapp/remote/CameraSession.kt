@@ -1,14 +1,24 @@
 package com.fujiapp.remote
 
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
 import android.content.Context
-import android.util.Base64
-import com.fujiapp.remote.model.Recipe
-import com.fujiapp.remote.model.RecipeProperty
-import com.fujiapp.remote.net.CameraNetwork
-import com.fujiapp.remote.net.FujiClient
-import com.fujiapp.remote.net.LiveViewStream
-import com.fujiapp.remote.net.PropDesc
-import com.fujiapp.remote.net.Ptp
+import com.fujiapp.remote.ble.Bonding
+import com.fujiapp.remote.ble.CameraBusyException
+import com.fujiapp.remote.ble.CameraScanner
+import com.fujiapp.remote.ble.FileTransferException
+import com.fujiapp.remote.ble.FoundCamera
+import com.fujiapp.remote.ble.FujiCamera
+import com.fujiapp.remote.ble.GattClient
+import com.fujiapp.remote.ble.GattException
+import com.fujiapp.remote.ble.UnsupportedCameraException
+import com.fujiapp.remote.data.BackupStore
+import com.fujiapp.remote.model.BackupMeta
+import com.fujiapp.remote.model.CameraInfo
+import com.fujiapp.remote.util.ProtocolLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,184 +26,242 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
-/** App-wide connection state. */
+/** Connection state shown by the UI. */
 sealed interface ConnState {
-    data object Disconnected : ConnState
+    data object Idle : ConnState
+    /** Cameras seen so far; [active] while the scan is still running. */
+    data class Scanning(val cameras: List<FoundCamera>, val active: Boolean) : ConnState
     data class Connecting(val message: String) : ConnState
-    data class Connected(val cameraName: String) : ConnState
+    data class Connected(val info: CameraInfo, val supportsBackup: Boolean) : ConnState
     data class Error(val message: String) : ConnState
 }
 
+/** Progress of a settings backup. */
+sealed interface BackupState {
+    data object Idle : BackupState
+    data class Running(val bytes: Int) : BackupState
+    data class Done(val meta: BackupMeta) : BackupState
+    data class Failed(val message: String) : BackupState
+}
+
 /**
- * Owns the camera connection, the live-view loop and recipe operations. One instance per process
- * (held by [App]). The command channel is serialised with [cmdLock]; live view runs on its own
- * socket so it can stream while commands are issued.
+ * Owns the Bluetooth connection to the camera: scanning, pairing, registration, camera info and
+ * backups. One instance per process, held by [App].
  */
-class CameraSession {
+@SuppressLint("MissingPermission")
+class CameraSession(context: Context) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val cmdLock = Mutex()
+    private val app = context.applicationContext
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val prefs = app.getSharedPreferences("cameras", Context.MODE_PRIVATE)
 
-    private var network: CameraNetwork? = null
-    private var client: FujiClient? = null
-    private var liveStream: LiveViewStream? = null
-    private var liveJob: Job? = null
+    val store = BackupStore(app)
 
-    private val _state = MutableStateFlow<ConnState>(ConnState.Disconnected)
+    private val _state = MutableStateFlow<ConnState>(ConnState.Idle)
     val state: StateFlow<ConnState> = _state.asStateFlow()
 
-    /** Latest live-view JPEG frame, or null when not streaming. */
-    private val _frame = MutableStateFlow<ByteArray?>(null)
-    val frame: StateFlow<ByteArray?> = _frame.asStateFlow()
+    private val _backup = MutableStateFlow<BackupState>(BackupState.Idle)
+    val backup: StateFlow<BackupState> = _backup.asStateFlow()
 
-    /** Properties enumerated from the camera (cached after connect). */
-    @Volatile var properties: List<PropDesc> = emptyList()
-        private set
+    private var scanJob: Job? = null
+    private var connectJob: Job? = null
+    private var backupJob: Job? = null
+    private var gatt: GattClient? = null
+    private var camera: FujiCamera? = null
 
-    val isConnected: Boolean get() = state.value is ConnState.Connected
+    val adapter: BluetoothAdapter?
+        get() = app.getSystemService(BluetoothManager::class.java)?.adapter
+
+    val isConnected: Boolean get() = _state.value is ConnState.Connected
+
+    // ---- paired cameras ----
+
+    /** Cameras this app registered with that are still bonded to the phone. */
+    fun pairedCameras(): List<BluetoothDevice> {
+        val addresses = prefs.getStringSet(KEY_ADDRESSES, emptySet()) ?: emptySet()
+        val names = prefs.getStringSet(KEY_NAMES, emptySet()) ?: emptySet()
+        val bonded = runCatching { adapter?.bondedDevices }.getOrNull() ?: return emptyList()
+        return bonded.filter { d ->
+            d.address in addresses || runCatching { d.name }.getOrNull()?.let { it in names } == true
+        }
+    }
+
+    private fun remember(device: BluetoothDevice, model: String?) {
+        val addresses = (prefs.getStringSet(KEY_ADDRESSES, emptySet()) ?: emptySet()) + device.address
+        val names = (prefs.getStringSet(KEY_NAMES, emptySet()) ?: emptySet()) +
+            listOfNotNull(model, runCatching { device.name }.getOrNull())
+        prefs.edit().putStringSet(KEY_ADDRESSES, addresses).putStringSet(KEY_NAMES, names).apply()
+    }
+
+    // ---- scanning ----
+
+    fun startScan() {
+        val a = adapter
+        if (a == null || !a.isEnabled) {
+            _state.value = ConnState.Error("Turn Bluetooth on, then try again.")
+            return
+        }
+        if (_state.value is ConnState.Connecting || _state.value is ConnState.Connected) return
+        scanJob?.cancel()
+        val found = LinkedHashMap<String, FoundCamera>()
+        _state.value = ConnState.Scanning(emptyList(), active = true)
+        scanJob = scope.launch {
+            try {
+                // Stop on its own: a camera advertises within seconds, longer only drains the battery.
+                withTimeoutOrNull(SCAN_TIMEOUT_MS) {
+                    CameraScanner(a).scan().collect { cam ->
+                        found[cam.device.address] = cam
+                        _state.value = ConnState.Scanning(found.values.toList(), active = true)
+                    }
+                }
+                _state.value = ConnState.Scanning(found.values.toList(), active = false)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                _state.value = ConnState.Error(t.message ?: "Bluetooth scan failed.")
+            }
+        }
+    }
+
+    /** Stop scanning; cameras already found stay listed so one can still be picked. */
+    fun stopScan() {
+        scanJob?.cancel()
+        scanJob = null
+        (_state.value as? ConnState.Scanning)?.let { _state.value = it.copy(active = false) }
+    }
 
     // ---- connection ----
 
-    fun connect(context: Context) {
-        if (_state.value is ConnState.Connecting) return
-        scope.launch {
+    /**
+     * Connect to [device], pairing first if it isn't bonded yet. With [waitForCamera] (a paired
+     * camera from [pairedCameras]) Android waits until the camera comes in range or is switched on.
+     */
+    fun connect(device: BluetoothDevice, waitForCamera: Boolean = false) {
+        stopScan()
+        connectJob?.cancel()
+        cleanup()
+        connectJob = scope.launch {
+            val client = GattClient(app, device) { ProtocolLog.add(it) }
+            gatt = client
             try {
-                _state.value = ConnState.Connecting("Looking for the camera's WiFi…")
-                val net = CameraNetwork(context).also { network = it }
-                val factory = net.bind()
-                    ?: throw IllegalStateException(
-                        "Couldn't reach the camera's WiFi. Join the camera's network in Settings, " +
-                            "then try again."
-                    )
-                val guid = loadOrCreateGuid(context)
-                val c = FujiClient(socketFactory = factory, clientGuid = guid, deviceName = "Fuji Remote")
-                client = c
-                cmdLock.withLock {
-                    c.connect(progress = { msg -> _state.value = ConnState.Connecting(msg) })
-                    properties = c.enumerateProperties()
+                _state.value = ConnState.Connecting(
+                    if (waitForCamera) "Waiting for the camera. Switch it on (or off and on again)." else "Connecting…"
+                )
+                client.connect(autoConnect = waitForCamera, timeoutMs = if (waitForCamera) 90_000 else 20_000)
+
+                if (device.bondState != BluetoothDevice.BOND_BONDED) {
+                    _state.value = ConnState.Connecting(PAIRING_MESSAGE)
+                    if (!Bonding.bond(app, device)) {
+                        throw GattException(
+                            "Pairing didn't complete. Start PAIRING REGISTRATION on the camera, then try again, " +
+                                "and confirm the code on both the camera and the phone."
+                        )
+                    }
                 }
-                _state.value = ConnState.Connected(c.cameraName.ifEmpty { "Fujifilm camera" })
+
+                _state.value = ConnState.Connecting("Reading the camera's services…")
+                runCatching { client.requestMtu() }
+                client.discoverServices()
+
+                _state.value = ConnState.Connecting("Registering with the camera…")
+                val cam = FujiCamera(client) { ProtocolLog.add(it) }
+                cam.register(onWaitingForPairing = { _state.value = ConnState.Connecting(PAIRING_MESSAGE) })
+                camera = cam
+
+                _state.value = ConnState.Connecting("Reading camera info…")
+                val info = cam.readInfo()
+                remember(device, info.model)
+                _state.value = ConnState.Connected(info, cam.supportsBackup)
+
+                client.disconnected.first { it }
+                if (gatt === client) {
+                    cleanup()
+                    _state.value = ConnState.Error("The camera disconnected.")
+                }
+            } catch (c: CancellationException) {
+                throw c
             } catch (t: Throwable) {
-                cleanup()
-                _state.value = ConnState.Error(t.message ?: "Connection failed")
+                ProtocolLog.add("connect failed: $t")
+                if (gatt === client) cleanup()
+                _state.value = ConnState.Error(friendly(t))
             }
         }
     }
 
     fun disconnect() {
-        scope.launch {
-            stopLiveViewInternal()
-            cmdLock.withLock { runCatching { client?.disconnect() } }
-            cleanup()
-            _state.value = ConnState.Disconnected
-        }
+        connectJob?.cancel()
+        backupJob?.cancel()
+        cleanup()
+        _state.value = ConnState.Idle
     }
 
     private fun cleanup() {
-        runCatching { liveStream?.close() }
-        liveStream = null
-        client = null
-        network?.release()
-        network = null
-        properties = emptyList()
-        _frame.value = null
+        gatt?.close()
+        gatt = null
+        camera = null
     }
 
-    // ---- live view ----
-
-    fun startLiveView(context: Context) {
-        val c = client ?: return
-        if (liveJob?.isActive == true) return
-        liveJob = scope.launch {
+    /** Read the camera info again (power state etc. may have changed). */
+    fun refreshInfo() {
+        val cam = camera ?: return
+        scope.launch {
             try {
-                cmdLock.withLock { c.startLiveView() }
-                val factory = network?.network?.socketFactory
-                val stream = LiveViewStream(
-                    socketFactory = factory ?: javax.net.SocketFactory.getDefault()
-                ).also { liveStream = it }
-                stream.open()
-                while (isActive) {
-                    val jpeg = runCatching { stream.readFrame() }.getOrNull() ?: continue
-                    _frame.value = jpeg
-                }
-            } catch (_: Throwable) {
-                // Stream ended or errored; leave the last frame up.
+                val info = cam.readInfo()
+                _state.value = ConnState.Connected(info, cam.supportsBackup)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                ProtocolLog.add("refresh failed: $t")
             }
         }
     }
 
-    fun stopLiveView() {
-        scope.launch { stopLiveViewInternal() }
-    }
+    // ---- backup ----
 
-    private suspend fun stopLiveViewInternal() {
-        liveJob?.cancel()
-        liveJob = null
-        runCatching { liveStream?.close() }
-        liveStream = null
-        _frame.value = null
-        cmdLock.withLock { runCatching { client?.stopLiveView() } }
-    }
-
-    // ---- remote control ----
-
-    suspend fun capture(): Boolean = onCmd { it.capture() } ?: false
-    suspend fun stepShutter(up: Boolean): Boolean = onCmd { it.stepShutter(up) } ?: false
-    suspend fun stepAperture(up: Boolean): Boolean = onCmd { it.stepAperture(up) } ?: false
-    suspend fun stepExposureComp(up: Boolean): Boolean = onCmd { it.stepExposureComp(up) } ?: false
-
-    /** Set a single property (used by live controls and recipe restore). */
-    suspend fun setProperty(code: Int, value: Long, sizeBytes: Int): Boolean =
-        onCmd { it.setDeviceProp(code, value, sizeBytes) } ?: false
-
-    /** Re-read all property descriptors (refreshes current values). */
-    suspend fun refreshProperties(): List<PropDesc> = onCmd {
-        it.enumerateProperties().also { list -> properties = list }
-    } ?: properties
-
-    private suspend fun <T> onCmd(block: (FujiClient) -> T): T? {
-        val c = client ?: return null
-        return withContext(Dispatchers.IO) { cmdLock.withLock { runCatching { block(c) }.getOrNull() } }
-    }
-
-    // ---- recipes ----
-
-    /** Build a recipe from the camera's current recipe-relevant, writable properties. */
-    suspend fun buildRecipe(name: String): Recipe? {
-        val descs = refreshProperties()
-        if (descs.isEmpty()) return null
-        val cameraName = (state.value as? ConnState.Connected)?.cameraName ?: ""
-        val props = descs
-            .filter { it.code !in Ptp.KnownProps.volatile }
-            .filter { Ptp.KnownProps.isRecipeProperty(it.code) || it.writable }
-            .map { RecipeProperty.fromDesc(it) }
-        return Recipe(name = name, camera = cameraName, savedAt = System.currentTimeMillis(), properties = props)
-    }
-
-    /** Write a recipe's properties back to the camera. Returns #applied / #total. */
-    suspend fun applyRecipe(recipe: Recipe): Pair<Int, Int> {
-        var applied = 0
-        for (p in recipe.properties) {
-            val size = Ptp.Type.sizeOf(p.dataType) ?: 4
-            if (setProperty(p.code, p.value, size)) applied++
+    fun startBackup(name: String) {
+        val cam = camera ?: return
+        if (_backup.value is BackupState.Running) return
+        backupJob = scope.launch {
+            _backup.value = BackupState.Running(0)
+            try {
+                val file = cam.downloadBackup { bytes -> _backup.value = BackupState.Running(bytes) }
+                val info = (state.value as? ConnState.Connected)?.info ?: CameraInfo()
+                val meta = withContext(Dispatchers.IO) { store.save(name, info, file) }
+                _backup.value = BackupState.Done(meta)
+            } catch (c: CancellationException) {
+                _backup.value = BackupState.Idle
+                throw c
+            } catch (t: Throwable) {
+                ProtocolLog.add("backup failed: $t")
+                _backup.value = BackupState.Failed(friendly(t))
+            }
         }
-        refreshProperties()
-        return applied to recipe.properties.size
     }
 
-    // ---- guid persistence ----
+    fun clearBackupState() {
+        if (_backup.value !is BackupState.Running) _backup.value = BackupState.Idle
+    }
 
-    private fun loadOrCreateGuid(context: Context): ByteArray {
-        val prefs = context.getSharedPreferences("fuji", Context.MODE_PRIVATE)
-        prefs.getString("guid", null)?.let { return Base64.decode(it, Base64.DEFAULT) }
-        val guid = FujiClient.randomGuid()
-        prefs.edit().putString("guid", Base64.encodeToString(guid, Base64.DEFAULT)).apply()
-        return guid
+    private fun friendly(t: Throwable): String = when (t) {
+        is UnsupportedCameraException, is CameraBusyException, is FileTransferException -> t.message ?: "Failed."
+        is GattException -> when (t.status) {
+            19 -> "The camera closed the connection. If this keeps happening, delete this phone from the " +
+                "camera's pairing list, remove the camera from the phone's Bluetooth settings, and pair again."
+            else -> t.message ?: "Bluetooth error."
+        }
+        is SecurityException -> "Bluetooth permission is missing. Allow Nearby devices for this app in Settings."
+        else -> t.message ?: t.javaClass.simpleName
+    }
+
+    private companion object {
+        const val KEY_ADDRESSES = "addresses"
+        const val KEY_NAMES = "names"
+        const val SCAN_TIMEOUT_MS = 30_000L
+        const val PAIRING_MESSAGE = "Pairing: confirm the code on the camera (MENU/OK) and on this phone."
     }
 }

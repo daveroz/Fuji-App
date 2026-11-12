@@ -2,16 +2,28 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Talk to the camera over its WiFi access point (no internet needed). -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
-    <!-- Needed on Android 13+ to request/bind a nearby WiFi network without location. -->
+    <!-- Bluetooth LE only: the app talks to the camera over Bluetooth, never WiFi. -->
+    <uses-feature
+        android:name="android.hardware.bluetooth_le"
+        android:required="true" />
+
+    <!-- Android 12 and later: find and connect to the camera. Scanning is not used for location. -->
     <uses-permission
-        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation"
-        tools:targetApi="33" />
+        tools:targetApi="31" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Android 11 and lower: Bluetooth plus location, which those versions require for BLE scans. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30" />
 
     <application
         android:name=".App"
@@ -33,15 +45,14 @@
         </activity>
 
         <activity
-            android:name=".ui.LiveViewActivity"
+            android:name=".ui.CameraInfoActivity"
             android:exported="false"
-            android:screenOrientation="fullSensor"
-            android:configChanges="orientation|screenSize|keyboardHidden" />
+            android:label="@string/camera_info" />
 
         <activity
-            android:name=".ui.RecipeActivity"
+            android:name=".ui.BackupsActivity"
             android:exported="false"
-            android:label="@string/recipes_title" />
+            android:label="@string/backups" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
