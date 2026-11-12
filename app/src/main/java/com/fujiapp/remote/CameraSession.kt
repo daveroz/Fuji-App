@@ -143,14 +143,14 @@ class CameraSession {
 
     // ---- remote control ----
 
-    suspend fun capture(): Boolean = onCmd { it.capture() }
-    suspend fun stepShutter(up: Boolean): Boolean = onCmd { it.stepShutter(up) }
-    suspend fun stepAperture(up: Boolean): Boolean = onCmd { it.stepAperture(up) }
-    suspend fun stepExposureComp(up: Boolean): Boolean = onCmd { it.stepExposureComp(up) }
+    suspend fun capture(): Boolean = onCmd { it.capture() } ?: false
+    suspend fun stepShutter(up: Boolean): Boolean = onCmd { it.stepShutter(up) } ?: false
+    suspend fun stepAperture(up: Boolean): Boolean = onCmd { it.stepAperture(up) } ?: false
+    suspend fun stepExposureComp(up: Boolean): Boolean = onCmd { it.stepExposureComp(up) } ?: false
 
     /** Set a single property (used by live controls and recipe restore). */
     suspend fun setProperty(code: Int, value: Long, sizeBytes: Int): Boolean =
-        onCmd { it.setDeviceProp(code, value, sizeBytes) }
+        onCmd { it.setDeviceProp(code, value, sizeBytes) } ?: false
 
     /** Re-read all property descriptors (refreshes current values). */
     suspend fun refreshProperties(): List<PropDesc> = onCmd {
