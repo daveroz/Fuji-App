@@ -123,17 +123,40 @@ class MainActivity : AppCompatActivity() {
             if (uri != null) loadLabPhoto(uri)
         }
 
+    /** A photo of the user's camera for the Camera tab. */
+    private val pickCameraPhoto =
+        registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+            if (uri != null) loadCameraPicture(uri)
+        }
+
+    fun pickCameraPicture() {
+        AppLog.ui("camera picture: pick")
+        pickCameraPhoto.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+
+    private fun loadCameraPicture(uri: Uri) {
+        lifecycleScope.launch {
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                decodeScaled(uri, CAMERA_PICTURE_MAX)?.let { CameraPicture.save(this@MainActivity, it); true } ?: false
+            }
+            if (ok) render() else showNotice("Couldn't open that picture.")
+        }
+    }
+
     /** A RAW (RAF) to develop on the camera. */
     private val pickRaf =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
             val then = afterRaf
             afterRaf = null
             if (uri == null) return@registerForActivityResult
-            developer.useRaf(uri)
-            if (!developer.rafName.endsWith(".raf", ignoreCase = true)) {
-                showNotice("Pick a RAW file (.RAF) this camera shot.")
+            val name = developer.nameOf(uri)
+            if (!name.endsWith(".raf", ignoreCase = true)) {
+                AppLog.ui("develop: not a RAF: $name")
+                showNotice("That's not a RAW file. Pick a .RAF this camera shot.")
                 return@registerForActivityResult
             }
+            developer.useRaf(uri)
+            recipesScreen.lab.useRafPicture(uri)
             then?.invoke()
         }
 
@@ -613,6 +636,49 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private val importBackupFile =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? -> if (uri != null) importBackup(uri) }
+
+    /** Bring in a backup saved elsewhere (shared from this app, or the camera's own file). */
+    fun pickBackupToImport() {
+        AppLog.ui("backup: import")
+        importBackupFile.launch(arrayOf("application/octet-stream", "*/*"))
+    }
+
+    private fun importBackup(uri: Uri) {
+        lifecycleScope.launch {
+            val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val name = contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                        ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                        ?.substringBeforeLast('.')?.trim()?.ifBlank { null } ?: "Imported backup"
+                    val data = contentResolver.openInputStream(uri)?.use { input ->
+                        val out = java.io.ByteArrayOutputStream()
+                        val buf = ByteArray(16 * 1024)
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            if (out.size() > MAX_IMPORT_BYTES) throw java.io.IOException("That file is too big to be a camera backup.")
+                        }
+                        out.toByteArray()
+                    } ?: throw java.io.IOException("Couldn't open that file.")
+                    val before = session.store.list().map { it.id }.toSet()
+                    val meta = session.store.import(name, data) ?: throw java.io.IOException("That isn't a camera settings backup.")
+                    meta to (meta.id !in before)
+                }
+            }
+            result.onSuccess { (meta, added) ->
+                AppLog.add("backup imported: ${meta.name} (${meta.cameraModel}, ${meta.size} bytes)")
+                backupsScreen.refreshList()
+                showNotice(if (added) "Imported \"${meta.name}\"." else "That backup is already here: \"${meta.name}\".")
+            }.onFailure {
+                AppLog.add("backup import failed: $it")
+                showNotice(it.message ?: "Couldn't import that file.")
+            }
+        }
+    }
+
     fun shareBackup(meta: BackupMeta) {
         AppLog.ui("backup shared: ${meta.name}")
         share(session.store.exportToCache(meta), "application/octet-stream", meta.name)
@@ -674,5 +740,9 @@ class MainActivity : AppCompatActivity() {
         const val HEADER_TOP = 24
         /** The tab bar: the night at 85%, so the haze shows faintly through it. */
         const val TAB_BAR = 0xD9070A10.toInt()
+        /** A camera backup is a few KB compressed, about 70 KB unpacked. */
+        const val MAX_IMPORT_BYTES = 2 * 1024 * 1024
+        /** Longest side the camera picture is kept at. */
+        const val CAMERA_PICTURE_MAX = 1400
     }
 }

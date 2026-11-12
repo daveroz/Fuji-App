@@ -22,6 +22,7 @@ class ConnectScreen(private val a: MainActivity) {
     private val c = a
     private val status = Kit.text(c, null, 15f, Deco.TEXT_SOFT)
     private val progress = Kit.progress(c)
+    private val art = CameraView(c, lit = false)
     private val find = Kit.button(c, "Find camera") { a.onFindPressed() }
     private val pairedTitle = Kit.sectionTitle(c, "Paired cameras")
     private val paired = Kit.column(c)
@@ -29,7 +30,7 @@ class ConnectScreen(private val a: MainActivity) {
     private val found = Kit.column(c)
 
     val view: View = Kit.page(c, Kit.column(c).apply {
-        addView(CameraArt(c).apply { lit = false }, Kit.lp(top = Deco.dpi(c, 4)))
+        addView(art, Kit.lp(top = Deco.dpi(c, 4)))
         addView(Kit.label(c, "Bluetooth", Deco.DIM), Kit.lp(top = Deco.dpi(c, 12)))
         addView(Kit.text(c, "Connect your camera", 30f), Kit.lp(top = Deco.dpi(c, 12)))
         addView(
@@ -52,6 +53,7 @@ class ConnectScreen(private val a: MainActivity) {
     })
 
     fun render(state: ConnState) {
+        art.refresh()
         val busy = state is ConnState.Connecting || (state is ConnState.Scanning && state.active)
         progress.visibility = if (busy) View.VISIBLE else View.GONE
         status.text = when (state) {
@@ -114,12 +116,13 @@ class ConnectScreen(private val a: MainActivity) {
 /** Everything the connected camera reports, live, plus the remote release. */
 class StatusScreen(private val a: MainActivity) {
     private val c = a
+    private val art = CameraView(c)
     private val strip = FrameLayout(c)
     private val sections = Kit.column(c)
     private val remoteCard = Kit.column(c)
 
     val view: View = Kit.page(c, Kit.column(c).apply {
-        addView(CameraArt(c), Kit.lp(top = Deco.dpi(c, 2)))
+        addView(art, Kit.lp(top = Deco.dpi(c, 2)))
         addView(Kit.row(c).apply {
             addView(tile("Photos", "Browse and import over Wi-Fi") { a.openCameraPage(MainActivity.CameraPage.PHOTOS) }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
             addView(tile("Remote", "Live view, exposure, shutter") { a.openCameraPage(MainActivity.CameraPage.REMOTE) }, Kit.lp(0, weight = 1f))
@@ -145,6 +148,7 @@ class StatusScreen(private val a: MainActivity) {
     private var shown: Pair<ConnState.Connected, VitalsState>? = null
 
     fun render(state: ConnState.Connected, vitals: VitalsState) {
+        art.refresh()
         // Render runs on every change anywhere in the app (transfer progress too); only rebuild
         // when the camera has told us something new.
         if (shown == (state to vitals)) return

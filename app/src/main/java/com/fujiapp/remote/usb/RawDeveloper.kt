@@ -24,6 +24,29 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 
+/**
+ * A RAF's header: "FUJIFILMCCD-RAW " and, big-endian at 84 and 88, where its embedded JPEG (the
+ * camera's own rendering when it was shot) starts and how long it is.
+ */
+object RafFile {
+    const val HEADER = 92
+    private const val MAGIC = "FUJIFILMCCD-RAW"
+
+    fun jpegRange(head: ByteArray): Pair<Int, Int>? {
+        if (head.size < HEADER || String(head, 0, MAGIC.length, Charsets.US_ASCII) != MAGIC) return null
+        val offset = be32(head, 84)
+        val length = be32(head, 88)
+        if (offset < HEADER || length <= 0 || length > MAX_JPEG) return null
+        return offset to length
+    }
+
+    private fun be32(b: ByteArray, at: Int): Int =
+        ((b[at].toInt() and 0xFF) shl 24) or ((b[at + 1].toInt() and 0xFF) shl 16) or
+            ((b[at + 2].toInt() and 0xFF) shl 8) or (b[at + 3].toInt() and 0xFF)
+
+    private const val MAX_JPEG = 64 * 1024 * 1024
+}
+
 /** Where a camera development stands. */
 sealed interface DevelopState {
     data object Idle : DevelopState
@@ -58,8 +81,41 @@ class RawDeveloper(context: Context) {
 
     fun useRaf(uri: Uri) {
         raf = uri
-        rafName = displayName(uri) ?: "RAW"
+        rafName = nameOf(uri)
         AppLog.ui("develop: RAF $rafName")
+    }
+
+    fun nameOf(uri: Uri): String = displayName(uri) ?: "RAW"
+
+    /** The RAW is on the camera and the USB session is open: a new version takes about a second. */
+    val ready: Boolean get() = camera != null && raf != null && uploaded == raf && baseProfile != null
+
+    /** The JPEG inside a RAF: the camera's picture as it was shot, for the phone preview. */
+    fun embeddedJpeg(uri: Uri): ByteArray? = runCatching {
+        app.contentResolver.openInputStream(uri)?.use { input ->
+            val head = ByteArray(RafFile.HEADER)
+            if (input.readNBytesCompat(head) < head.size) return null
+            val (offset, length) = RafFile.jpegRange(head) ?: return null
+            var skip = (offset - head.size).toLong()
+            while (skip > 0) {
+                val n = input.skip(skip)
+                if (n <= 0) return null
+                skip -= n
+            }
+            val jpeg = ByteArray(length)
+            if (input.readNBytesCompat(jpeg) < length) return null
+            jpeg.takeIf { it[0] == 0xFF.toByte() && it[1] == 0xD8.toByte() }
+        }
+    }.getOrNull()
+
+    private fun java.io.InputStream.readNBytesCompat(b: ByteArray): Int {
+        var off = 0
+        while (off < b.size) {
+            val n = read(b, off, b.size - off)
+            if (n < 0) break
+            off += n
+        }
+        return off
     }
 
     fun develop(recipe: Recipe) {

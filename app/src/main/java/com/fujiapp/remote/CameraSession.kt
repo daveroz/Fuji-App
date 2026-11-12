@@ -270,14 +270,18 @@ class CameraSession(context: Context) {
         var attempt = 0
         var reconnecting = false
         var storedRejected = false
+        var afterWifi = false
         while (true) {
             attempt++
             val client = GattClient(app, device) { AppLog.add(it) }
             gatt = client
             try {
-                val wait = waitForCamera || reconnecting || attempt > 1
+                // Back from Wi-Fi the camera is right here: a direct connection is much quicker than
+                // Android's background one (which only scans now and then).
+                val wait = (waitForCamera || reconnecting || attempt > 1) && !afterWifi
                 _state.value = ConnState.Connecting(
                     when {
+                        afterWifi -> "Back from Wi-Fi. Reconnecting Bluetooth…"
                         reconnecting -> "Connection lost. Reconnecting…"
                         attempt > 1 -> "Retrying ($attempt of $MAX_ATTEMPTS)…"
                         waitForCamera -> "Waiting for the camera. Switch it on, or off and on again."
@@ -292,6 +296,7 @@ class CameraSession(context: Context) {
                 if (usedStored) storedRejected = false
                 attempt = 0
                 reconnecting = false
+                afterWifi = false
 
                 client.disconnected.first { it }
                 if (gatt !== client || userDisconnected) return
@@ -302,6 +307,7 @@ class CameraSession(context: Context) {
                     _state.value = ConnState.Connecting("On the camera's Wi-Fi. Bluetooth reconnects afterwards.")
                     wifiActive.first { !it }
                     if (userDisconnected) return
+                    afterWifi = true
                 }
                 AppLog.add("connection lost, reconnecting")
                 reconnecting = true
@@ -309,6 +315,7 @@ class CameraSession(context: Context) {
                 throw c
             } catch (t: Throwable) {
                 AppLog.add("connect attempt $attempt failed: $t")
+                afterWifi = false // the next try waits in the background as usual
                 if (t is RegistrationRejected && t.usedStored) storedRejected = true
                 if (gatt === client) cleanup()
                 if (userDisconnected) return

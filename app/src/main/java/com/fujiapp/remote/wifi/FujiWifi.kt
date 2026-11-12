@@ -58,11 +58,19 @@ class FujiWifi private constructor(
         for (attempt in 1..2) {
             try {
                 open()
-                socket?.soTimeout = if (attempt == 1) FIRST_INIT_TIMEOUT_MS else RETRY_INIT_TIMEOUT_MS
                 write(initPacket(name))
                 log("wifi: init sent (attempt $attempt), waiting for the camera")
-                onWaiting()
-                val reply = readPacket()
+                // A camera that knows this phone answers at once; only ask for OK when it's silent.
+                val limit = if (attempt == 1) FIRST_INIT_TIMEOUT_MS else RETRY_INIT_TIMEOUT_MS
+                val reply = try {
+                    socket?.soTimeout = OK_PROMPT_AFTER_MS
+                    readPacket()
+                } catch (_: java.net.SocketTimeoutException) {
+                    log("wifi: the camera is waiting (press OK on it)")
+                    onWaiting()
+                    socket?.soTimeout = limit - OK_PROMPT_AFTER_MS
+                    readPacket()
+                }
                 socket?.soTimeout = READ_TIMEOUT_MS
                 val type = if (reply.size >= 8) u32(reply, 4) else 0
                 if (type == INIT_FAIL) throw IOException("The camera refused the connection")
@@ -391,6 +399,8 @@ class FujiWifi private constructor(
         private const val CLOSE_TIMEOUT_MS = 2_000
         private const val FIRST_INIT_TIMEOUT_MS = 40_000
         private const val RETRY_INIT_TIMEOUT_MS = 12_000
+        /** Silence this long after the init means the camera is asking for OK on its screen. */
+        private const val OK_PROMPT_AFTER_MS = 1_500
         private const val SETTLE_MS = 60L
         private const val MAX_PACKET = 64 * 1024 * 1024
         private const val WINDOW = 1024 * 1024

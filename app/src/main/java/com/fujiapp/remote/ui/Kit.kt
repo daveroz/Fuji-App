@@ -1,5 +1,6 @@
 package com.fujiapp.remote.ui
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Typeface
@@ -12,6 +13,7 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.view.isGone
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import com.google.android.material.slider.LabelFormatter
 import com.google.android.material.slider.Slider
@@ -177,9 +179,9 @@ object Kit {
     }
 
     /** A row of choices; the chosen one is lit. */
-    class Chips(c: Context, private val options: List<String>, private val onPick: (Int) -> Unit) {
+    class Chips(c: Context, private val options: List<String>, wrap: Boolean = false, private val onPick: (Int) -> Unit) {
         private val ctx = c
-        private val strip = row(c)
+        private val strip: ViewGroup = if (wrap) FlowLayout(c, Deco.dpi(c, 6), Deco.dpi(c, 6)) else row(c)
         private val chips = options.mapIndexed { i, o ->
             label(c, o, Deco.MUTED, 11f).apply {
                 gravity = Gravity.CENTER
@@ -187,9 +189,13 @@ object Kit {
                 minHeight = Deco.dpi(c, 38)
                 isClickable = true
                 setOnClickListener { onPick(i) }
-            }.also { strip.addView(it, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = Deco.dpi(c, 6) }) }
+            }.also {
+                if (wrap) strip.addView(it, ViewGroup.LayoutParams(WRAP, WRAP))
+                else strip.addView(it, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = Deco.dpi(c, 6) })
+            }
         }
-        val view: View = HorizontalScrollView(c).apply {
+        /** All choices visible ([wrap]: in lines), or one scrolling row. */
+        val view: View = if (wrap) strip else HorizontalScrollView(c).apply {
             isHorizontalScrollBarEnabled = false
             addView(strip)
         }
@@ -311,5 +317,51 @@ object Kit {
     fun big(c: Context, value: String?, sizeSp: Float = 56f) = text(c, value, sizeSp, Deco.TEXT).apply {
         typeface = Typeface.create(Deco.regular(c), Typeface.NORMAL)
         letterSpacing = -0.01f
+    }
+}
+
+/** Children laid out left to right, wrapping onto new lines: chips that all stay in view. */
+@SuppressLint("ViewConstructor") // made in code only
+class FlowLayout(c: Context, private val gapX: Int, private val gapY: Int) : ViewGroup(c) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val maxWidth = MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
+        var x = 0
+        var y = 0
+        var lineHeight = 0
+        var widest = 0
+        for (i in 0 until childCount) {
+            val child = getChildAt(i)
+            if (child.isGone) continue
+            measureChild(child, MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
+            if (x > 0 && x + child.measuredWidth > maxWidth) {
+                x = 0
+                y += lineHeight + gapY
+                lineHeight = 0
+            }
+            x += child.measuredWidth + gapX
+            widest = maxOf(widest, x - gapX)
+            lineHeight = maxOf(lineHeight, child.measuredHeight)
+        }
+        val width = if (MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.UNSPECIFIED) widest else maxWidth
+        setMeasuredDimension(width + paddingLeft + paddingRight, resolveSize(y + lineHeight + paddingTop + paddingBottom, heightMeasureSpec))
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val maxWidth = r - l - paddingLeft - paddingRight
+        var x = 0
+        var y = 0
+        var lineHeight = 0
+        for (i in 0 until childCount) {
+            val child = getChildAt(i)
+            if (child.isGone) continue
+            if (x > 0 && x + child.measuredWidth > maxWidth) {
+                x = 0
+                y += lineHeight + gapY
+                lineHeight = 0
+            }
+            child.layout(paddingLeft + x, paddingTop + y, paddingLeft + x + child.measuredWidth, paddingTop + y + child.measuredHeight)
+            x += child.measuredWidth + gapX
+            lineHeight = maxOf(lineHeight, child.measuredHeight)
+        }
     }
 }

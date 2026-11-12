@@ -15,6 +15,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 import androidx.lifecycle.lifecycleScope
 import com.fujiapp.remote.preview.PreviewSource
 import com.fujiapp.remote.preview.RecipePreview
@@ -26,9 +27,11 @@ import com.fujiapp.remote.recipe.FilmSim
 import com.fujiapp.remote.recipe.Grain
 import com.fujiapp.remote.recipe.Recipe
 import com.fujiapp.remote.recipe.WhiteBalance
+import com.fujiapp.remote.usb.DevelopState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -55,8 +58,17 @@ class LabScreen(private val a: MainActivity) {
     private var showScope = true
     private var renderJob: Job? = null
     private var updating = false
+    /** The vectorscope of [developed]. */
+    private var developedScope: IntArray? = null
+    /** The picture is a RAW's own JPEG: the camera's rendering when it was shot. */
+    private var asShot = false
+    /** A camera development waiting for the controls to settle. */
+    private var autoJob: Job? = null
+    private var lastDone: DevelopState.Done? = null
+    /** The last development was started here (not from the Camera button), so its failure is told here. */
+    private var autoStarted = false
 
-    private val image = ImageView(c).apply {
+    private val image = RoundedImageView(c, Deco.dp(c, 12f)).apply {
         scaleType = ImageView.ScaleType.FIT_CENTER
         contentDescription = "Preview. Touch and hold to see the original."
     }
@@ -86,11 +98,9 @@ class LabScreen(private val a: MainActivity) {
         })
     }
 
-    private val filmSim = Kit.PickerRow(c, "Film simulation") {
-        a.choose("Film simulation", FilmSim.entries.map { it.label }, FilmSim.entries.indexOf(recipe.filmSim)) { i ->
-            val sim = FilmSim.entries[i]
-            change(recipe.copy(filmSim = sim, monoWarmCool = if (sim.toning) recipe.monoWarmCool else 0, monoMagentaGreen = if (sim.toning) recipe.monoMagentaGreen else 0))
-        }
+    private val filmSim = Kit.Chips(c, SIMS.map { it.second }, wrap = true) { i ->
+        val sim = SIMS[i].first
+        change(recipe.copy(filmSim = sim, monoWarmCool = if (sim.toning) recipe.monoWarmCool else 0, monoMagentaGreen = if (sim.toning) recipe.monoMagentaGreen else 0))
     }
     private val grain = Kit.Chips(c, listOf("Off", "Weak S", "Strong S", "Weak L", "Strong L")) { i -> change(recipe.copy(grain = Grain.entries[i])) }
     private val chrome = Kit.Chips(c, listOf("Off", "Weak", "Strong")) { i -> change(recipe.copy(colorChrome = Effect.entries[i])) }
@@ -116,7 +126,7 @@ class LabScreen(private val a: MainActivity) {
     private val monoNote = Kit.text(c, "Monochrome: color and the color chrome effects don't apply.", 13f, Deco.MUTED)
 
     private val groups: List<View> = listOf(
-        group(filmSim.view, grainRow, toneWc.view, toneMg.view),
+        group(labelled("Film simulation", filmSim.view), grainRow, toneWc.view, toneMg.view),
         group(color.view, chromeRow, chromeBlueRow, monoNote),
         group(whiteBalance.view, kelvin.view, wbRed.view, wbBlue.view),
         group(labelled("Dynamic range", dynamicRange.view), highlight.view, shadow.view),
@@ -125,6 +135,20 @@ class LabScreen(private val a: MainActivity) {
     private val controls = FrameLayout(c)
     private val tabs = Kit.Chips(c, listOf("Film", "Color", "Light", "Tone", "Detail")) { showGroup(it) }
     private val scopeToggle = Kit.Chips(c, listOf("Scope")) { toggleScope() }
+
+    /** The preview's box: the picture sits inside it with an even margin and matching corners. */
+    private val frame = FrameLayout(c).apply {
+        background = Deco.glass(c, 16f)
+        val pad = Deco.dpi(c, FRAME_PAD_DP)
+        setPadding(pad, pad, pad, pad)
+        addView(image, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
+        addView(scope, FrameLayout.LayoutParams(Deco.dpi(c, 104), Deco.dpi(c, 104), Gravity.TOP or Gravity.END).apply {
+            setMargins(0, Deco.dpi(c, 4), Deco.dpi(c, 4), 0)
+        })
+        addView(status, FrameLayout.LayoutParams(Kit.WRAP, Kit.WRAP, Gravity.BOTTOM or Gravity.START).apply {
+            setMargins(Deco.dpi(c, 10), 0, Deco.dpi(c, 10), Deco.dpi(c, 8))
+        })
+    }
 
     val view: View = Kit.column(c).apply {
         val m = Deco.dpi(c, Kit.PAGE_MARGIN)
@@ -136,20 +160,10 @@ class LabScreen(private val a: MainActivity) {
                     if (i == 0) useSample() else a.pickLabPhoto()
                 }
             })
-            addView(small("Start") { a.recipeFlow.chooseStart() })
+            addView(small("Library") { a.recipeFlow.chooseStart() })
             addView(small("Camera") { a.recipeFlow.develop(recipe) })
         })
-        addView(FrameLayout(c).apply {
-            background = Deco.glass(c, 16f)
-            setPadding(Deco.dpi(c, 4), Deco.dpi(c, 4), Deco.dpi(c, 4), Deco.dpi(c, 4))
-            addView(image, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
-            addView(scope, FrameLayout.LayoutParams(Deco.dpi(c, 104), Deco.dpi(c, 104), Gravity.TOP or Gravity.END).apply {
-                setMargins(0, Deco.dpi(c, 4), Deco.dpi(c, 4), 0)
-            })
-            addView(status, FrameLayout.LayoutParams(Kit.WRAP, Kit.WRAP, Gravity.BOTTOM or Gravity.START).apply {
-                setMargins(Deco.dpi(c, 8), 0, 0, Deco.dpi(c, 6))
-            })
-        }, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 224)).apply { topMargin = Deco.dpi(c, 10) })
+        addView(frame, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, FRAME_DP)).apply { topMargin = Deco.dpi(c, 10) })
         addView(Kit.row(c).apply {
             addView(tabs.view, Kit.lp(0, weight = 1f))
             addView(scopeToggle.view, Kit.lp(Kit.WRAP).apply { marginStart = Deco.dpi(c, 4) })
@@ -169,13 +183,13 @@ class LabScreen(private val a: MainActivity) {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     showingOriginal = true
-                    image.setImageBitmap(if (developed != null) rendered else original)
-                    status.text = if (developed != null) "Phone preview" else "Original"
+                    image.setImageBitmap(original)
+                    status.text = if (asShot) "As shot (the RAW's own JPEG)" else "Original"
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     showingOriginal = false
                     image.setImageBitmap(developed ?: rendered)
-                    status.text = if (developed != null) "Developed by the camera · hold for the phone preview" else "Hold to compare"
+                    status.text = idleStatus()
                     if (e.actionMasked == MotionEvent.ACTION_UP) v.performClick()
                 }
             }
@@ -186,7 +200,54 @@ class LabScreen(private val a: MainActivity) {
         scopeToggle.select(0)
         show()
         useSample()
+        // Every development the camera finishes, started here or from the Camera button.
+        a.lifecycleScope.launch {
+            a.developer.state.collect { s ->
+                when (s) {
+                    is DevelopState.Working -> if (developed != null && !showingOriginal) status.text = DEVELOPING
+                    is DevelopState.Done -> if (s !== lastDone) {
+                        lastDone = s
+                        autoStarted = false
+                        showDeveloped(s.jpeg, s.recipe)
+                    }
+                    is DevelopState.Failed -> {
+                        if (autoStarted) a.showNotice("The camera stopped developing: ${s.message}")
+                        autoStarted = false
+                        if (developed != null) {
+                            // The camera is gone (unplugged, or it gave up): back to the phone preview.
+                            developed = null
+                            developedScope = null
+                            requestRender(immediate = true)
+                        }
+                    }
+                    else -> Unit
+                }
+            }
+        }
     }
+
+    private fun idleStatus(): String = when {
+        developed != null -> "Developed by the camera · hold for the original"
+        asShot -> "Phone preview on the RAW's JPEG · hold for the original"
+        else -> "Hold to compare"
+    }
+
+    /** With a RAW on the camera, each change is developed there once the controls settle. */
+    private fun scheduleDevelop() {
+        val dev = a.developer
+        if (!dev.ready) return
+        autoJob?.cancel()
+        autoJob = a.lifecycleScope.launch {
+            delay(AUTO_DEVELOP_MS)
+            dev.state.first { it !is DevelopState.Working }
+            if (dev.ready && recipe.problems().isEmpty()) {
+                autoStarted = true
+                dev.develop(recipe)
+            }
+        }
+    }
+
+    private fun same(x: Recipe, y: Recipe) = x.copy(name = "") == y.copy(name = "")
 
     private fun small(title: String, onClick: () -> Unit): View =
         Kit.button(c, title, Kit.Style.QUIET, onClick).apply { minWidth = 0; minimumWidth = 0; setPadding(Deco.dpi(c, 10), 0, Deco.dpi(c, 10), 0) }
@@ -204,7 +265,16 @@ class LabScreen(private val a: MainActivity) {
         showScope = !showScope
         scopeToggle.select(if (showScope) 0 else null)
         scope.visibility = if (showScope) View.VISIBLE else View.GONE
-        if (showScope) requestRender(immediate = true)
+        if (!showScope) return
+        val px = developedScope
+        val target = scopeBitmap
+        if (developed != null && px != null && target != null) {
+            target.setPixels(px, 0, SCOPE, 0, 0, SCOPE, SCOPE)
+            scope.setImageBitmap(target)
+            scope.invalidate()
+        } else {
+            requestRender(immediate = true)
+        }
     }
 
     private fun labelled(title: String, content: View): View = Kit.column(c).apply {
@@ -214,21 +284,26 @@ class LabScreen(private val a: MainActivity) {
     }
 
     /** Start from [r]: its settings fill the controls. */
-    fun load(r: Recipe) {
-        recipe = r.copy(name = r.cameraName)
-        show()
-        requestRender()
-    }
+    fun load(r: Recipe) = change(r.copy(name = r.cameraName))
 
     private fun change(r: Recipe) {
         recipe = r
-        developed = null // a changed recipe needs a new development
         show()
+        if (a.developer.ready) {
+            // Keep the camera's last picture up until the new one arrives (about a second).
+            if (developed != null && !showingOriginal) status.text = DEVELOPING
+            scheduleDevelop()
+        } else {
+            developed = null
+            developedScope = null
+        }
         requestRender()
     }
 
     /** Show the camera's own rendering of [r] (a JPEG it developed from a RAW), with its vectorscope. */
-    fun showDeveloped(jpeg: ByteArray, r: Recipe) {
+    private fun showDeveloped(jpeg: ByteArray, r: Recipe) {
+        // A development of an older version: the newer one is on its way.
+        if (!same(r, recipe) && a.developer.ready) return
         a.lifecycleScope.launch {
             val (bmp, scopePixels) = withContext(Dispatchers.Default) {
                 val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -244,10 +319,14 @@ class LabScreen(private val a: MainActivity) {
                 a.showNotice("Couldn't show the developed picture.")
                 return@launch
             }
+            if (!same(r, recipe) && a.developer.ready) return@launch
             developed = bmp
-            if (recipe != r) { recipe = r.copy(name = r.cameraName); show() }
-            image.setImageBitmap(bmp)
-            status.text = "Developed by the camera · hold for the phone preview"
+            developedScope = scopePixels
+            if (!showingOriginal) {
+                image.setImageBitmap(bmp)
+                status.text = idleStatus()
+            }
+            fitFrame(bmp.width, bmp.height)
             val target = scopeBitmap
             if (scopePixels != null && target != null && showScope) {
                 target.setPixels(scopePixels, 0, SCOPE, 0, 0, SCOPE, SCOPE)
@@ -261,7 +340,7 @@ class LabScreen(private val a: MainActivity) {
         updating = true
         val r = recipe
         if (name.text.toString() != r.name) name.setText(r.name)
-        filmSim.set(r.filmSim.label)
+        filmSim.select(SIMS.indexOfFirst { it.first == r.filmSim }.takeIf { it >= 0 })
         grain.select(Grain.entries.indexOf(r.grain))
         chrome.select(Effect.entries.indexOf(r.colorChrome))
         chromeBlue.select(Effect.entries.indexOf(r.colorChromeBlue))
@@ -281,17 +360,35 @@ class LabScreen(private val a: MainActivity) {
         updating = false
     }
 
-    fun useSample() = setPicture { Triple(SAMPLE_W, SAMPLE_H, SampleScene.pixels(SAMPLE_W, SAMPLE_H)) }
+    fun useSample() = setPicture(asShot = false) { Triple(SAMPLE_W, SAMPLE_H, SampleScene.pixels(SAMPLE_W, SAMPLE_H)) }
+
+    /** The phone preview works on the RAW's own JPEG, so holding and the scope show the same photo. */
+    fun useRafPicture(uri: android.net.Uri) {
+        a.lifecycleScope.launch {
+            val bitmap = withContext(Dispatchers.IO) { a.developer.embeddedJpeg(uri)?.let { decodeJpeg(it, PHOTO_MAX) } }
+            if (bitmap == null) {
+                a.showNotice("Couldn't read the RAW's preview: the phone preview stays on the current picture.")
+                return@launch
+            }
+            setPicture(asShot = true) {
+                val px = IntArray(bitmap.width * bitmap.height)
+                bitmap.getPixels(px, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                Triple(bitmap.width, bitmap.height, px)
+            }
+        }
+    }
 
     /** Use a picture from the phone (already scaled down). */
-    fun usePhoto(bitmap: Bitmap) = setPicture {
+    fun usePhoto(bitmap: Bitmap) = setPicture(asShot = false) {
         val px = IntArray(bitmap.width * bitmap.height)
         bitmap.getPixels(px, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
         Triple(bitmap.width, bitmap.height, px)
     }
 
-    private fun setPicture(load: () -> Triple<Int, Int, IntArray>) {
+    private fun setPicture(asShot: Boolean, load: () -> Triple<Int, Int, IntArray>) {
         developed = null
+        developedScope = null
+        this.asShot = asShot
         a.lifecycleScope.launch {
             status.text = "Preparing…"
             val (src, orig) = withContext(Dispatchers.Default) {
@@ -302,7 +399,24 @@ class LabScreen(private val a: MainActivity) {
             original = orig
             rendered = createBitmap(src.width, src.height)
             scopeBitmap = createBitmap(SCOPE, SCOPE)
+            fitFrame(src.width, src.height)
             requestRender(immediate = true)
+        }
+    }
+
+    /** Size the box to the picture's shape (within limits), so the margin around it is even. */
+    private fun fitFrame(w: Int, h: Int) {
+        frame.post {
+            val pad = Deco.dpi(c, FRAME_PAD_DP)
+            val inner = frame.width - 2 * pad
+            if (inner <= 0 || w <= 0 || h <= 0) return@post
+            val want = (inner.toFloat() * h / w).toInt() + 2 * pad
+            val height = want.coerceIn(Deco.dpi(c, FRAME_MIN_DP), Deco.dpi(c, FRAME_MAX_DP))
+            val lp = frame.layoutParams
+            if (lp.height != height) {
+                lp.height = height
+                frame.layoutParams = lp
+            }
         }
     }
 
@@ -322,18 +436,50 @@ class LabScreen(private val a: MainActivity) {
             target.setPixels(out, 0, src.width, 0, 0, src.width, src.height)
             if (!showingOriginal && developed == null) image.setImageBitmap(target)
             image.invalidate()
-            if (scopePixels != null && scopeTarget != null) {
+            // While the camera's picture shows, the scope stays on it.
+            if (scopePixels != null && scopeTarget != null && developed == null) {
                 scopeTarget.setPixels(scopePixels, 0, SCOPE, 0, 0, SCOPE, SCOPE)
                 scope.setImageBitmap(scopeTarget)
                 scope.invalidate()
             }
-            if (developed == null) status.text = "Hold to compare"
+            if (developed == null && !showingOriginal) status.text = idleStatus()
         }
     }
 
     companion object {
         /** Longest side the camera's developed JPEG is shown at. */
         private const val DEVELOPED_MAX = 1400
+        private const val DEVELOPING = "Developing on the camera…"
+        /** How long the controls must rest before the camera develops again. */
+        private const val AUTO_DEVELOP_MS = 600L
+        private const val FRAME_DP = 224
+        private const val FRAME_MIN_DP = 180
+        private const val FRAME_MAX_DP = 280
+        private const val FRAME_PAD_DP = 4
+        /** Film simulations in the camera's menu order, with short names for the chips. */
+        private val SIMS = listOf(
+            FilmSim.PROVIA to "Provia", FilmSim.VELVIA to "Velvia", FilmSim.ASTIA to "Astia",
+            FilmSim.CLASSIC_CHROME to "Classic Chrome", FilmSim.REALA_ACE to "Reala Ace",
+            FilmSim.PRO_NEG_HI to "Pro Neg Hi", FilmSim.PRO_NEG_STD to "Pro Neg Std",
+            FilmSim.CLASSIC_NEG to "Classic Neg", FilmSim.NOSTALGIC_NEG to "Nostalgic Neg",
+            FilmSim.ETERNA to "Eterna", FilmSim.BLEACH_BYPASS to "Bleach Bypass",
+            FilmSim.ACROS to "Acros", FilmSim.ACROS_YE to "Acros Ye", FilmSim.ACROS_R to "Acros R", FilmSim.ACROS_G to "Acros G",
+            FilmSim.MONOCHROME to "Mono", FilmSim.MONOCHROME_YE to "Mono Ye", FilmSim.MONOCHROME_R to "Mono R",
+            FilmSim.MONOCHROME_G to "Mono G", FilmSim.SEPIA to "Sepia",
+        )
+
+        /** Decode a JPEG to at most [max] pixels on its long side. */
+        fun decodeJpeg(jpeg: ByteArray, max: Int): Bitmap? {
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= max) sample *= 2
+            val b = android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+                ?: return null
+            val scale = max.toFloat() / maxOf(b.width, b.height)
+            return if (scale >= 1f) b else b.scale(maxOf(1, (b.width * scale).toInt()), maxOf(1, (b.height * scale).toInt()))
+        }
         const val SAMPLE_W = 900
         const val SAMPLE_H = 600
         /** Longest side a photo is scaled to for the preview. */
@@ -348,5 +494,29 @@ class LabScreen(private val a: MainActivity) {
 
         fun signedInt(v: Float): String = Recipe.signed(v.roundToInt())
         fun signedHalf(v: Float): String = Recipe.signed((v * 2).roundToInt() / 2.0)
+    }
+}
+
+/** An ImageView whose picture has rounded corners where it's actually drawn (FIT_CENTER included). */
+@SuppressLint("ViewConstructor", "UseKtx") // made in code only; super.onDraw can't go in withClip's lambda
+private class RoundedImageView(c: android.content.Context, private val radius: Float) : androidx.appcompat.widget.AppCompatImageView(c) {
+    private val clip = android.graphics.Path()
+    private val box = android.graphics.RectF()
+
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        val d = drawable
+        if (d == null || d.intrinsicWidth <= 0 || d.intrinsicHeight <= 0) {
+            super.onDraw(canvas)
+            return
+        }
+        box.set(0f, 0f, d.intrinsicWidth.toFloat(), d.intrinsicHeight.toFloat())
+        imageMatrix.mapRect(box)
+        box.offset(paddingLeft.toFloat(), paddingTop.toFloat())
+        clip.reset()
+        clip.addRoundRect(box, radius, radius, android.graphics.Path.Direction.CW)
+        val save = canvas.save()
+        canvas.clipPath(clip)
+        super.onDraw(canvas)
+        canvas.restoreToCount(save)
     }
 }

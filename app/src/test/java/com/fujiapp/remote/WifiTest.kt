@@ -65,3 +65,14 @@ class WifiTest {
         assertEquals(listOf(200L, 400L), FujiWifi.parseDesc(enum)!!.values)
     }
 }
+
+class RafFileTest {
+    @Test
+    fun findsTheEmbeddedJpeg() {
+        val head = ByteArray(com.fujiapp.remote.usb.RafFile.HEADER)
+        "FUJIFILMCCD-RAW 0201".toByteArray(Charsets.US_ASCII).copyInto(head)
+        ByteBuffer.wrap(head).order(ByteOrder.BIG_ENDIAN).putInt(84, 0x94).putInt(88, 1_234_567)
+        assertEquals(0x94 to 1_234_567, com.fujiapp.remote.usb.RafFile.jpegRange(head))
+        assertNull(com.fujiapp.remote.usb.RafFile.jpegRange(ByteArray(92)))
+    }
+}

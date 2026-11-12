@@ -60,7 +60,7 @@ class RecipeFlow(private val a: MainActivity) {
         val options = RecipeLibrary.all.map { it.title to it.recipe } +
             a.myRecipes.list().map { "Mine: ${it.title}" to it.recipe } +
             transfer.lastSlots.mapNotNull { s -> s.recipe?.let { "C${s.number}: ${s.name.ifBlank { "not named" }}" to it } }
-        a.choose("Start from", options.map { it.first }, -1) { i -> a.recipesScreen.lab.load(options[i].second) }
+        a.choose("Start from a recipe", options.map { it.first }, -1) { i -> a.recipesScreen.lab.load(options[i].second) }
     }
 
     // ---- develop on camera ----
@@ -116,8 +116,8 @@ class RecipeFlow(private val a: MainActivity) {
             dismissProgress()
             when (val s = dev.state.value) {
                 is com.fujiapp.remote.usb.DevelopState.Done -> {
-                    a.recipesScreen.lab.showDeveloped(s.jpeg, s.recipe)
-                    a.showNotice("Developed by the camera in ${"%.0f".format(s.seconds)} s.", "Save") {
+                    // The Lab shows it (it follows every development); from now on each change develops on its own.
+                    a.showNotice("Developed by the camera in ${"%.1f".format(s.seconds)} s. Changes develop on the camera as you go.", "Save") {
                         val name = runCatching { dev.saveLast() }.getOrNull()
                         a.showNotice(if (name != null) "Saved to Pictures/Fuji Remote: $name" else "Couldn't save the picture.")
                     }
@@ -204,8 +204,14 @@ class RecipeFlow(private val a: MainActivity) {
         b.show()
     }
 
-    /** Back up over Bluetooth when the camera is connected that way, otherwise over USB just before writing. */
+    /** Back up over USB when the camera is plugged in, else over Bluetooth if connected, else over USB just before writing. */
     private fun backupThenConnect(recipe: Recipe, slot: Int) {
+        // Already on USB: back up that way, right before writing (Bluetooth may still be connected too).
+        if (transfer.cameraPlugged()) {
+            AppLog.ui("load ${recipe.cameraName} into C$slot: back up over USB")
+            write(recipe, slot, usbBackup = true)
+            return
+        }
         val connected = a.session.state.value as? ConnState.Connected
         if (connected == null || !connected.capabilities.backup) {
             usbInstructions("Back up and load") { write(recipe, slot, usbBackup = true) }

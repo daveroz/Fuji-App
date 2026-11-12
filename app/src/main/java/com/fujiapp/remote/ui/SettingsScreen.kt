@@ -30,6 +30,14 @@ class SettingsScreen(private val a: MainActivity) {
     private val connectWhileOff = Kit.Toggle(c, "Connect while power off", "The camera keeps Bluetooth on in standby, so the app can reach it while it's off.") { on ->
         a.session.setCameraConnectWhileOff(on)
     }
+    private val cameraPicture = Kit.PickerRow(c, "Camera picture") {
+        a.choose("Camera picture", listOf("Choose a photo of your camera", "Use the app's drawing"), -1) { i ->
+            if (i == 0) a.pickCameraPicture() else {
+                CameraPicture.clear(a)
+                a.render()
+            }
+        }
+    }
     private val cameraNote = Kit.text(c, null, 13f, Deco.MUTED)
     private val cameraPanel = Kit.panel(c)
 
@@ -40,6 +48,8 @@ class SettingsScreen(private val a: MainActivity) {
         addView(Kit.sectionTitle(c, "In this app"))
         addView(Kit.panel(c).apply {
             addView(syncTime.view)
+            addView(Kit.hairline(c))
+            addView(cameraPicture.view)
         })
 
         addView(Kit.sectionTitle(c, "On the camera"))
@@ -88,6 +98,7 @@ class SettingsScreen(private val a: MainActivity) {
 
     fun render(state: ConnState) {
         syncTime.set(a.session.settings.syncTime)
+        cameraPicture.set(if (CameraPicture.isCustom(a)) "Your photo" else "Drawing")
         val connected = state as? ConnState.Connected
         val busy = a.session.isTransferring
         val s = connected?.snapshot

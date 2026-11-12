@@ -45,6 +45,9 @@ class SettingsFile private constructor(
             return SettingsFile(model, version, raw.size, slots(raw))
         }
 
+        /** True for the camera's file as it is inside (not compressed). */
+        fun isUnpacked(data: ByteArray): Boolean = startsWithMagic(data)
+
         private fun startsWithMagic(b: ByteArray): Boolean =
             b.size >= MAGIC.length && String(b, 0, MAGIC.length, Charsets.ISO_8859_1) == MAGIC
 

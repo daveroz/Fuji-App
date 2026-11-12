@@ -12,7 +12,8 @@ camera's custom slots uses a **USB-C cable**, the only way the camera accepts th
   and films; a **Lab** to try settings on a picture; and loading any recipe into a slot (over USB,
   after a backup)
 - **Equipment**: shutter count and every usage counter the camera keeps
-- **Backups**: back up the camera's settings (your **C1–C7 recipes** included) and restore them
+- **Backups**: back up the camera's settings (your **C1–C7 recipes** included), restore them, and
+  import backup files saved elsewhere
 - **Settings**: clock sync, optional location sync (geotagging), the camera's Bluetooth settings,
   and the **log**
 
@@ -25,11 +26,11 @@ or redistributed.**
 
 | Tab | What's on it |
 |---|---|
-| **Camera** | Before connecting: find and pair a camera, or reconnect to a paired one. Connected: a drawing of the camera, the **Photos** and **Remote** tiles (Wi-Fi, see below), a readout strip (shots, power, Wi-Fi, firmware), the **remote release** (hold to focus, let go to shoot), and every value the camera reports, decoded and kept live. **State:** power switch, Wi-Fi access point, pictures waiting, why it's busy, card, firmware update. **Camera:** model, name, serial, firmware, model code. **Connection:** paired phones, connect while off, location sync and interval, transfer settings, activity log. **Lens**, and **Technical** details. |
-| **Recipes** | Three sections. **Camera**: the C1–C7 names, read over Bluetooth from the camera's settings file when you open it (about 2 seconds; offline, the newest backup stands in), and, over USB, every setting of every slot. **Library**: 30 recipes after popular film stocks (Portra, Ektar, Gold, Kodachrome, Superia, Pro 400H, Velvia, CineStill, Tri-X, HP5…) and films (Blade Runner 2049, Skyfall, The Matrix, Fury Road, Drive, Amélie, In the Mood for Love, Dune…), each with what the look is, how the settings get there, and how to shoot it. **Lab**: the preview stays on screen while the settings, in five tabs (Film, Color, Light, Tone, Detail), change it; the sample is a color chart (the 24 color-checker patches, eight skin tones, a grey ramp) or one of your photos, and a **vectorscope** in the manner of DaVinci Resolve's shows where every color lands, with the **skin-tone line** to check skin against; save the result to My recipes. Any recipe can be loaded into a slot. |
+| **Camera** | Before connecting: find and pair a camera, or reconnect to a paired one. Connected: a drawing of the camera (or your own photo of it, set in Settings), the **Photos** and **Remote** tiles (Wi-Fi, see below), a readout strip (shots, power, Wi-Fi, firmware), the **remote release** (hold to focus, let go to shoot), and every value the camera reports, decoded and kept live. **State:** power switch, Wi-Fi access point, pictures waiting, why it's busy, card, firmware update. **Camera:** model, name, serial, firmware, model code. **Connection:** paired phones, connect while off, location sync and interval, transfer settings, activity log. **Lens**, and **Technical** details. |
+| **Recipes** | Three sections. **Camera**: the C1–C7 names, read over Bluetooth from the camera's settings file when you open it (about 2 seconds; offline, the newest backup stands in), and, over USB, every setting of every slot. **Library**: 30 recipes after popular film stocks (Portra, Ektar, Gold, Kodachrome, Superia, Pro 400H, Velvia, CineStill, Tri-X, HP5…) and films (Blade Runner 2049, Skyfall, The Matrix, Fury Road, Drive, Amélie, In the Mood for Love, Dune…), each with what the look is, how the settings get there, and how to shoot it. **Lab**: the preview stays on screen while the settings, in five tabs (Film, Color, Light, Tone, Detail), change it; film simulations, grain and the effects are one-tap chips; **Library** starts from any recipe; the sample is a color chart (the 24 color-checker patches, eight skin tones, a grey ramp) or one of your photos, and a **vectorscope** in the manner of DaVinci Resolve's shows where every color lands, with the **skin-tone line** to check skin against; save the result to My recipes. Any recipe can be loaded into a slot. |
 | **Equipment** | Total shots, shutter actuations against the rated shutter life, and all of the camera's usage counters: power-ons, operating, shooting and viewfinder time, viewfinder switches, flash, half-presses, OK and command-dial use, sensor cleanings, heat warnings and shutdowns, time spent with the sensor hot, battery, USB and lens counts. |
-| **Backups** | Back up the camera's settings file, restore it to the same model, share it, delete it. |
-| **Settings** | **Set the camera clock** (on by default, as XApp does). The camera's **Location sync** (see below), **location interval** and **Connect while power off** settings, written straight to the camera. **Log**: save, share, clear. |
+| **Backups** | Back up the camera's settings file, restore it to the same model, share it, delete it, or **import** a backup file (one shared from this app, or the camera's own file). |
+| **Settings** | **Set the camera clock** (on by default, as XApp does). **Camera picture**: the app's drawing, or a photo of your camera. The camera's **Location sync** (see below), **location interval** and **Connect while power off** settings, written straight to the camera. **Log**: save, share, clear. |
 
 The **LOG** button at the top of every screen saves the app's recording as a `.txt` file in
 **Downloads** (on Android 9 and lower you pick where). The recording runs all the time and
@@ -40,8 +41,9 @@ off, save it and send it.
 ### Loading a recipe into a slot
 
 Pick a recipe (in the Library, the Lab or My recipes), tap **Load** and choose C1–C7. The app then
-**always asks to back up first**: with the camera connected by Bluetooth it takes a normal backup;
-otherwise it downloads the backup over USB right before writing. Either lands in **Backups** and
+**always asks to back up first**: with the camera already on USB it downloads the backup over USB
+right before writing; with the camera connected by Bluetooth it takes a normal backup; otherwise
+over USB again. Either lands in **Backups** and
 restores every setting, all seven slots included. You can also choose to load without one.
 
 Then connect the camera to the phone with a **USB-C cable**, with the camera's USB connection mode
@@ -74,10 +76,12 @@ What's possible, and how:
 In the Lab, **Camera** renders the recipe on one of your RAW files with the camera's own
 processor: exactly what the camera would make, not the phone's approximation. Pick a RAF this
 camera shot (import it with Photos, or from anywhere on the phone), connect the camera by USB in
-**USB RAW CONV./BACKUP RESTORE**, and the developed picture replaces the preview (hold it to see
-the phone's approximation next to it; the vectorscope follows the camera's picture). Change the
-recipe and develop again: the RAF is uploaded once, and each version takes a few seconds. **Save**
-keeps the camera's JPEG in Pictures/Fuji Remote.
+**USB RAW CONV./BACKUP RESTORE**, and the developed picture replaces the preview; the vectorscope
+follows the camera's picture. From then on **every change develops on the camera by itself** once
+the controls rest for a moment: the RAF is uploaded once, and each version takes about a second
+on an X100VI. Hold the picture to see it as shot (the JPEG inside the RAF); without the camera,
+the phone's approximation works on that same JPEG. **Save** keeps the camera's JPEG in
+Pictures/Fuji Remote.
 
 This is X RAW Studio's method: upload the RAF, patch the conversion profile (`0xD185`) with the
 recipe, start a reduced-size conversion (`0xD183 = 0`) and fetch the JPEG. A conversion that
@@ -89,9 +93,10 @@ the battery out if it won't switch off); the app never starts another on top of 
 **Photos** and **Remote** on the Camera tab work like XApp's: the app asks the camera over
 Bluetooth to start its Wi-Fi, reads the network's name and password, and joins it for this app
 only (Android asks you to confirm; the phone keeps its normal connection for everything else).
-Then press **OK** on the camera to allow the connection: the camera waits for it before it
-answers, and gives up its Wi-Fi about 45 seconds after starting it. The camera closes Bluetooth
-while its Wi-Fi is on; the app reconnects Bluetooth when you close Photos or Remote.
+A camera that doesn't know the phone yet asks on its screen whether to allow it: press **OK**
+there (the app says so only when the camera is waiting; one that knows the phone answers at once).
+The camera gives up its Wi-Fi about 45 seconds after starting it if nobody connects. The camera may close Bluetooth
+while its Wi-Fi is on; the app reconnects Bluetooth directly when you close Photos or Remote.
 
 - **Photos** lists the card, newest first, with the camera's own thumbnails. Select pictures and
   import them, or import the newest ten; they land in **Pictures/Fuji Remote** (RAW and video in

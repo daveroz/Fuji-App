@@ -16,7 +16,7 @@ class BackupsScreen(private val a: MainActivity) {
     private val progress = Kit.progress(c)
     private val status = Kit.text(c, null, 14f, Deco.MUTED)
     private val list = Kit.column(c)
-    private val empty = Kit.text(c, "No backups yet. Connect to the camera and back up its settings.", 14f, Deco.MUTED)
+    private val empty = Kit.text(c, "No backups yet. Connect to the camera and back up its settings, or import a backup file.", 14f, Deco.MUTED)
     private var shownDone: BackupMeta? = null
     private var restoreAllowed = false
     private var items: List<BackupMeta> = emptyList()
@@ -34,6 +34,7 @@ class BackupsScreen(private val a: MainActivity) {
             Kit.lp(top = Deco.dpi(c, 14)),
         )
         addView(backupButton, Kit.lp(top = Deco.dpi(c, 24)))
+        addView(Kit.button(c, "Import a backup file", Kit.Style.SECONDARY) { a.pickBackupToImport() }, Kit.lp(top = Deco.dpi(c, 10)))
         addView(progress, Kit.lp(top = Deco.dpi(c, 12)))
         addView(status, Kit.lp(top = Deco.dpi(c, 10)))
         addView(Kit.sectionTitle(c, "Saved on this phone"))

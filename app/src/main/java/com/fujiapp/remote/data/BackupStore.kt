@@ -5,6 +5,7 @@ import com.fujiapp.remote.ble.DownloadedFile
 import com.fujiapp.remote.model.BackupMeta
 import com.fujiapp.remote.model.CameraInfo
 import com.fujiapp.remote.model.SettingsFile
+import com.fujiapp.remote.usb.RecipeTransfer
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
@@ -48,6 +49,20 @@ class BackupStore(context: Context) {
         File(dir, "$id.json").writeText(meta.toJson().toString(2))
         revision++
         return meta
+    }
+
+    /**
+     * Keep a backup file from elsewhere: one shared from this app (the camera's file, compressed) or
+     * the camera's file unpacked. Null if it isn't a camera settings backup. A file already here
+     * (same bytes) isn't kept twice: the existing backup is returned.
+     */
+    fun import(name: String, data: ByteArray): BackupMeta? {
+        val parsed = SettingsFile.parse(data) ?: return null
+        // Restores send the file as the camera hands it out: compressed.
+        val stored = if (SettingsFile.isUnpacked(data)) RecipeTransfer.deflate(data) else data
+        val hash = sha256(stored)
+        list().firstOrNull { it.sha256 == hash }?.let { return it }
+        return save(name, CameraInfo(model = parsed.model.ifBlank { null }), DownloadedFile("backup.dat", stored))
     }
 
     fun dataFile(meta: BackupMeta): File = File(dir, "${meta.id}.dat")
