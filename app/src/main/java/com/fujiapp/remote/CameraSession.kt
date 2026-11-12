@@ -619,6 +619,8 @@ class CameraSession(context: Context) {
                 val cam = camera ?: throw GattException("Not connected.")
                 // On Wi-Fi the camera doesn't answer transfers over Bluetooth (it says busy, then nothing).
                 if (wifiActive.value) throw CameraBusyException("The camera is on Wi-Fi for Photos or Remote. Close them first.")
+                // Plugged in by USB the camera answers Bluetooth transfers with "busy", then nothing.
+                if (usbPlugged()) throw CameraBusyException("The camera is connected by USB. Unplug the cable to use Bluetooth backups and recipe reads.")
                 try {
                     awaitReady()
                     Result.success(op(cam))
@@ -642,6 +644,9 @@ class CameraSession(context: Context) {
         }.also { job -> job.invokeOnCompletion { opLock.unlock() } }
         return true
     }
+
+    private fun usbPlugged(): Boolean =
+        app.getSystemService(android.hardware.usb.UsbManager::class.java)?.let { com.fujiapp.remote.usb.UsbCamera.find(it) } != null
 
     /**
      * The camera reports its power switch once it has finished its side of the connection; until

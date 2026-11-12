@@ -67,6 +67,8 @@ class LabScreen(private val a: MainActivity) {
     private var lastDone: DevelopState.Done? = null
     /** The last development was started here (not from the Camera button), so its failure is told here. */
     private var autoStarted = false
+    /** An automatic development failed: wait for the Camera button before trying again. */
+    private var autoFailed = false
 
     private val image = RoundedImageView(c, Deco.dp(c, 12f)).apply {
         scaleType = ImageView.ScaleType.FIT_CENTER
@@ -204,14 +206,20 @@ class LabScreen(private val a: MainActivity) {
         a.lifecycleScope.launch {
             a.developer.state.collect { s ->
                 when (s) {
-                    is DevelopState.Working -> if (developed != null && !showingOriginal) status.text = DEVELOPING
+                    is DevelopState.Working -> if (!showingOriginal && (developed != null || autoStarted)) {
+                        status.text = if (s.message.startsWith("Uploading") || s.message.startsWith("Connecting")) s.message else DEVELOPING
+                    }
                     is DevelopState.Done -> if (s !== lastDone) {
                         lastDone = s
                         autoStarted = false
+                        autoFailed = false
                         showDeveloped(s.jpeg, s.recipe)
                     }
                     is DevelopState.Failed -> {
-                        if (autoStarted) a.showNotice("The camera stopped developing: ${s.message}")
+                        if (autoStarted) {
+                            a.showNotice("The camera stopped developing: ${s.message}")
+                            autoFailed = true
+                        }
                         autoStarted = false
                         if (developed != null) {
                             // The camera is gone (unplugged, or it gave up): back to the phone preview.
@@ -232,15 +240,24 @@ class LabScreen(private val a: MainActivity) {
         else -> "Hold to compare"
     }
 
+    /**
+     * The camera can develop the next change: the RAW is on it, or (after a slot load or read, which
+     * closes the session) the camera is still plugged in and the RAW can go back up by itself.
+     */
+    private fun canDevelop(): Boolean {
+        val dev = a.developer
+        return dev.ready || (dev.raf != null && !autoFailed && !a.transfer.busy && a.transfer.cameraPlugged())
+    }
+
     /** With a RAW on the camera, each change is developed there once the controls settle. */
     private fun scheduleDevelop() {
         val dev = a.developer
-        if (!dev.ready) return
+        if (!canDevelop()) return
         autoJob?.cancel()
         autoJob = a.lifecycleScope.launch {
             delay(AUTO_DEVELOP_MS)
             dev.state.first { it !is DevelopState.Working }
-            if (dev.ready && recipe.problems().isEmpty()) {
+            if (canDevelop() && recipe.problems().isEmpty()) {
                 autoStarted = true
                 dev.develop(recipe)
             }
@@ -289,7 +306,7 @@ class LabScreen(private val a: MainActivity) {
     private fun change(r: Recipe) {
         recipe = r
         show()
-        if (a.developer.ready) {
+        if (canDevelop()) {
             // Keep the camera's last picture up until the new one arrives (about a second).
             if (developed != null && !showingOriginal) status.text = DEVELOPING
             scheduleDevelop()
@@ -364,6 +381,7 @@ class LabScreen(private val a: MainActivity) {
 
     /** The phone preview works on the RAW's own JPEG, so holding and the scope show the same photo. */
     fun useRafPicture(uri: android.net.Uri) {
+        autoFailed = false
         a.lifecycleScope.launch {
             val bitmap = withContext(Dispatchers.IO) { a.developer.embeddedJpeg(uri)?.let { decodeJpeg(it, PHOTO_MAX) } }
             if (bitmap == null) {

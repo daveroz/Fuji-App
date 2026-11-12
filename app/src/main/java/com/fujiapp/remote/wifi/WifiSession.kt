@@ -58,6 +58,8 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     private var wifi: FujiWifi? = null
     private var live: FujiWifi.LiveView? = null
     private var job: Job? = null
+    private var listJob: Job? = null
+    private var importJob: Job? = null
     private var liveJob: Job? = null
     private var handles: List<Int> = emptyList()
     private var listed = 0
@@ -93,33 +95,47 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         listed = 0
         _photos.value = emptyList()
         _phase.value = WifiPhase.Photos
-        listMore(w)
+        // Its own job, so importing can start while the list is still loading.
+        listJob = scope.launch { runCatching { listMore(w) }.onFailure { fail("list", it) } }
     }
 
     fun loadMore() {
         val w = wifi ?: return
-        if (_phase.value != WifiPhase.Photos || job?.isActive == true) return
-        job = scope.launch { runCatching { listMore(w) }.onFailure { fail("list", it) } }
+        if (_phase.value != WifiPhase.Photos || listJob?.isActive == true) return
+        listJob = scope.launch { runCatching { listMore(w) }.onFailure { fail("list", it) } }
     }
 
-    /** List the next page, newest first, then fetch the thumbnails. */
+    /**
+     * List the next page, newest first: each picture's details, then right away its thumbnail (the
+     * camera serves a thumbnail only for the picture it just described).
+     */
     private suspend fun listMore(w: FujiWifi) {
         val page = handles.reversed().drop(listed).take(PAGE)
         listed += page.size
         var unreadable = 0
+        var thumbs = true
         for ((i, h) in page.withIndex()) {
             _progress.value = "Reading the card… ${i + 1} of ${page.size}"
-            val p = io.withLock { withContext(Dispatchers.IO) { w.describe(h) } }
+            val (p, bytes) = io.withLock {
+                withContext(Dispatchers.IO) {
+                    val p = w.describe(h) ?: return@withContext null to null
+                    val t = if (!thumbs) null else try {
+                        w.thumbnail(h)
+                    } catch (e: IOException) {
+                        // A thumbnail that never comes leaves the connection out of step: stop asking.
+                        AppLog.add("wifi: thumbnail #$h failed: ${e.message}; no more thumbnails")
+                        thumbs = false
+                        null
+                    }
+                    p to t
+                }
+            }
             if (p == null) {
                 unreadable++
                 continue
             }
-            _photos.value = _photos.value + CardPhoto(p, null, isImported(p))
-        }
-        for (cp in _photos.value.filter { it.thumb == null }) {
-            val bytes = io.withLock { withContext(Dispatchers.IO) { runCatching { w.thumbnail(cp.photo.handle) }.getOrNull() } } ?: continue
-            val bmp = withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) } ?: continue
-            _photos.value = _photos.value.map { if (it.photo.handle == cp.photo.handle) it.copy(thumb = bmp) else it }
+            val bmp = bytes?.let { withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(it, 0, it.size) } }
+            _photos.value = _photos.value + CardPhoto(p, bmp, isImported(p))
         }
         _progress.value = if (unreadable > 0) "The camera didn't describe $unreadable of ${page.size} pictures." else null
     }
@@ -127,9 +143,14 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     /** Copy [selected] into the phone's Pictures (Downloads for RAW and video). */
     fun importPhotos(selected: List<FujiWifi.Photo>) {
         val w = wifi ?: return
-        if (job?.isActive == true || selected.isEmpty()) return
+        if (selected.isEmpty()) return
+        if (importJob?.isActive == true) {
+            _progress.value = "Already importing. Wait for it to finish."
+            return
+        }
         AppLog.ui("wifi: import ${selected.size}")
-        job = scope.launch {
+        _progress.value = "Importing ${selected.size} ${if (selected.size == 1) "picture" else "pictures"}…"
+        importJob = scope.launch {
             var done = 0
             try {
                 for (p in selected) {
@@ -144,6 +165,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
                         }
                     }
                     markImported(p)
+                    AppLog.add("wifi: imported ${p.name}")
                     done++
                     _photos.value = _photos.value.map { if (it.photo.handle == p.handle) it.copy(imported = true) else it }
                 }
@@ -272,7 +294,14 @@ class WifiSession(context: Context, private val camera: CameraSession) {
 
     private fun step(w: FujiWifi, op: Int, up: Boolean, what: String) {
         val code = w.step(op, up)
-        _note.value = if (code == Ptp.OK) null else "The camera didn't change the $what: its dial is set to a value."
+        _note.value = when {
+            code != Ptp.OK -> "The camera didn't change the $what: its dial is set to a value."
+            what == "shutter speed" && values[FujiWifi.SHOOTING_MODE] in setOf(2L, 3L) ->
+                "In mode ${modeText(values[FujiWifi.SHOOTING_MODE]!!)} the camera picks the shutter speed: set the shutter dial to a speed (or T) to choose it."
+            what == "aperture" && values[FujiWifi.SHOOTING_MODE] in setOf(2L, 4L) ->
+                "In mode ${modeText(values[FujiWifi.SHOOTING_MODE]!!)} the camera picks the aperture: set the aperture ring to a value to choose it."
+            else -> null
+        }
     }
 
     private fun remote(what: String, action: suspend (FujiWifi) -> Unit) {
@@ -292,7 +321,23 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     }
 
     /** What the camera reported, by property code: its event list fills in what changed. */
-    private val values = HashMap<Int, Long>()
+    private val values = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+
+    /** The camera's current value of [property], as last reported. */
+    fun currentValue(property: Int): Long? = values[property]
+
+    /** A setting's allowed values and width, from the camera. */
+    suspend fun describeSetting(property: Int): FujiWifi.PropDesc? {
+        val w = wifi ?: return null
+        return io.withLock { withContext(Dispatchers.IO) { runCatching { w.propDesc(property) }.getOrNull() } }
+    }
+
+    /** Change one of the camera's settings (film simulation, white balance, focus mode…). */
+    fun setSetting(property: Int, value: Long, width: Int, label: String) = remote("set %04X = %X".format(property, value)) { w ->
+        val ok = w.setValue(property, value, width)
+        AppLog.add("wifi: set %04X = %X -> %s".format(property, value, if (ok) "OK" else "refused"))
+        _note.value = if (ok) "$label set." else "The camera kept its setting (a dial or menu may decide it)."
+    }
     private var loggedEvents = false
 
     /** Read the camera's event list (and with [full], each shown property) and update the readings. */
@@ -341,7 +386,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     }
 
     /** Standard PTP exposure program. */
-    private fun modeText(v: Long): String? = when (v) {
+    fun modeText(v: Long): String? = when (v) {
         1L -> "M"
         2L -> "P"
         3L -> "A"
@@ -361,6 +406,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         job = scope.launch {
             try {
                 _phase.value = WifiPhase.Working("Asking the camera to start its Wi-Fi…")
+                if (usbPlugged()) throw IOException(USB_PLUGGED)
                 // The camera closes Bluetooth once its Wi-Fi is up; reconnecting then would pull it off Wi-Fi.
                 camera.setWifiActive(true)
                 val net = camera.wakeWifi(
@@ -377,10 +423,16 @@ class WifiSession(context: Context, private val camera: CameraSession) {
                 } catch (e: IOException) {
                     // A quick "unavailable" usually means Android scanned before the camera's network was up.
                     if (System.currentTimeMillis() - joinStarted > JOIN_RETRY_WITHIN_MS) throw e
-                    AppLog.add("wifi: join failed (${e.message}); trying once more")
+                    AppLog.add("wifi: join failed (${e.message}); trying again")
                     _phase.value = WifiPhase.Working("Joining ${net.ssid} again…")
-                    delay(2_000)
-                    join.join(net.ssid, net.password)
+                    delay(3_000)
+                    try {
+                        join.join(net.ssid, net.password)
+                    } catch (e2: IOException) {
+                        AppLog.add("wifi: join failed again (${e2.message}); one last try")
+                        delay(3_000)
+                        join.join(net.ssid, net.password)
+                    }
                 }
                 AppLog.add("wifi: joined ${net.ssid}")
                 _phase.value = WifiPhase.Working("Connecting to the camera…")
@@ -402,6 +454,9 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         }
     }
 
+    private fun usbPlugged(): Boolean =
+        app.getSystemService(android.hardware.usb.UsbManager::class.java)?.let { com.fujiapp.remote.usb.UsbCamera.find(it) } != null
+
     private fun fail(what: String, t: Throwable) {
         AppLog.error("wifi $what", t)
         _phase.value = WifiPhase.Failed(t.message ?: t.javaClass.simpleName)
@@ -421,6 +476,10 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     }
 
     private fun cleanup() {
+        listJob?.cancel()
+        listJob = null
+        importJob?.cancel()
+        importJob = null
         pollJob?.cancel()
         pollJob = null
         liveJob?.cancel()
@@ -459,11 +518,13 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         private const val ACCESS_TIMEOUT_MS = 120_000L
         private const val POLL_MS = 600L
         private const val JOIN_RETRY_WITHIN_MS = 20_000L
+        const val USB_PLUGGED = "The camera is connected by USB, and won't start its Wi-Fi like that. Unplug the cable, then try again."
         /** Every this many polls, read the shown properties directly too. */
         private const val FULL_EVERY = 10
         private val SHOWN = listOf(
             FujiWifi.SHUTTER_SPEED, FujiWifi.EXPOSURE_TIME, FujiWifi.F_NUMBER, FujiWifi.ISO,
             FujiWifi.EXPOSURE_BIAS, FujiWifi.SHOOTING_MODE, FujiWifi.BATTERY_LEVELS, FujiWifi.BATTERY,
+            FujiWifi.FILM_SIMULATION, FujiWifi.WHITE_BALANCE, FujiWifi.FOCUS_MODE, FujiWifi.IMAGE_QUALITY, FujiWifi.SELF_TIMER,
         )
     }
 }

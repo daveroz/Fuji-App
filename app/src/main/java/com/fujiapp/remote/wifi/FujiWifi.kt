@@ -201,6 +201,7 @@ class FujiWifi private constructor(
         }
         val r = transact(Ptp.GET_OBJECT_INFO, listOf(handle))
         if (!r.ok) return null
+        lastInfo = handle
         if (!loggedInfo) {
             loggedInfo = true
             log("wifi: ObjectInfo #$handle ${r.data.size} bytes: ${r.data.take(64).joinToString(" ") { "%02x".format(it) }}")
@@ -211,6 +212,19 @@ class FujiWifi private constructor(
     private var propertiesWork = true
     private var honestSizes = false
     private var loggedInfo = false
+    /** The handle whose ObjectInfo was asked last. */
+    private var lastInfo = -1
+
+    /**
+     * Newer bodies only answer GetThumb (and serve a file) for the handle whose ObjectInfo was
+     * asked just before: otherwise GetThumb blocks for good (libfuji: "get_thumb blocks forever
+     * unless get_object_info is called on newer cameras"; seen on an X100VI).
+     */
+    private fun ensureInfo(handle: Int) {
+        if (lastInfo == handle) return
+        val r = transact(Ptp.GET_OBJECT_INFO, listOf(handle))
+        if (r.ok) lastInfo = handle
+    }
 
     private fun byProperties(handle: Int): Photo? {
         val sizeData = transact(GET_OBJECT_PROP_VALUE, listOf(handle, OBJECT_SIZE)).takeIf { it.ok }?.data ?: return null
@@ -226,10 +240,14 @@ class FujiWifi private constructor(
     }
 
     /** The camera's own 160×120 JPEG thumbnail. */
-    fun thumbnail(handle: Int): ByteArray? = transact(GET_THUMB, listOf(handle)).takeIf { it.ok && it.data.isNotEmpty() }?.data
+    fun thumbnail(handle: Int): ByteArray? {
+        ensureInfo(handle)
+        return transact(GET_THUMB, listOf(handle)).takeIf { it.ok && it.data.size >= 100 }?.data
+    }
 
     /** Copy a photo in 1 MB windows from 512-byte-aligned offsets, as fuji-bridge does. */
     fun download(photo: Photo, sink: (ByteArray) -> Unit, progress: (Long) -> Unit) {
+        ensureInfo(photo.handle)
         var offset = 0L
         val known = photo.size > 0
         while (!known || offset < photo.size) {
@@ -282,9 +300,7 @@ class FujiWifi private constructor(
         val current = get(S1_LOCK_POINT)?.takeIf { it.size >= 4 }?.let { u32(it, 0) }
         var point = current ?: 0
         if (at != null && current != null) {
-            val grid = focusGrid ?: propDesc(S1_LOCK_POINT)?.max?.toInt()?.also { focusGrid = it }
-            val cols = grid?.let { (it shr 8) and 0xFF } ?: 0
-            val rows = grid?.let { it and 0xFF } ?: 0
+            val (cols, rows) = focusGrid ?: grid(current).also { focusGrid = it }
             if (cols > 0 && rows > 0) {
                 val col = (at.first * cols).toInt().coerceIn(0, cols - 1) + 1
                 val row = (at.second * rows).toInt().coerceIn(0, rows - 1) + 1
@@ -295,7 +311,34 @@ class FujiWifi private constructor(
         return transact(LOCK_S1, listOf(point)).code
     }
 
-    private var focusGrid: Int? = null
+    private var focusGrid: Pair<Int, Int>? = null
+
+    /**
+     * The camera's focus grid, columns × rows: the low two bytes of 0xD17C's maximum, as XApp reads
+     * it. If the description doesn't say, assume the current point is the middle one (the X100VI's
+     * 13 × 9 grid has its centre at 7, 5).
+     */
+    private fun grid(current: Int): Pair<Int, Int> {
+        val desc = transact(GET_DEVICE_PROP_DESC, listOf(S1_LOCK_POINT))
+        log("wifi: focus point description ${desc.data.size} bytes: ${desc.data.take(48).joinToString(" ") { "%02x".format(it) }}")
+        val d = if (desc.ok) parseDesc(desc.data) else null
+        val max = (d?.max ?: d?.values?.maxOrNull())?.toInt()
+        val fromDesc = max?.let { ((it shr 8) and 0xFF) to (it and 0xFF) }?.takeIf { it.first in 2..60 && it.second in 2..60 }
+        val col = (current shr 8) and 0xFF
+        val row = current and 0xFF
+        val guessed = (2 * col - 1 to 2 * row - 1).takeIf { col > 1 && row > 1 }
+        val g = fromDesc ?: guessed ?: (0 to 0)
+        log("wifi: focus grid ${g.first} × ${g.second}${if (fromDesc == null) " (from the current point)" else ""}")
+        return g
+    }
+
+    /** Set a property to [value], written at [width] bytes (from its description). */
+    fun setValue(property: Int, value: Long, width: Int): Boolean = when (width) {
+        1 -> setRaw(property, byteArrayOf(value.toByte()))
+        2 -> set16(property, value.toInt())
+        8 -> setRaw(property, ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(value).array())
+        else -> set32(property, value.toInt())
+    }
 
     /** Let go of the half press. */
     fun releaseFocus(): Int = transact(UNLOCK_S1).code
@@ -387,7 +430,7 @@ class FujiWifi private constructor(
     data class Photo(val handle: Int, val name: String, val size: Long, val date: String?)
 
     /** What GetDevicePropDesc says: the current value and a range (min, max) or a list. */
-    data class PropDesc(val current: Long, val min: Long?, val max: Long?, val values: List<Long>)
+    data class PropDesc(val current: Long, val min: Long?, val max: Long?, val values: List<Long>, val width: Int = 4)
 
     companion object {
         const val HOST = "192.168.0.1"
@@ -457,6 +500,10 @@ class FujiWifi private constructor(
         const val ORIGINALS = 2
         const val EXPOSURE_BIAS = 0x5010
         const val FILM_SIMULATION = 0xD001
+        const val WHITE_BALANCE = 0x5005
+        const val FOCUS_MODE = 0x500A
+        const val IMAGE_QUALITY = 0xD018
+        const val SELF_TIMER = 0x5012
 
         const val MODE_IMAGE_VIEW_XAPP = 20
         const val MODE_LIVE_VIEW_XAPP = 22
@@ -490,17 +537,17 @@ class FujiWifi private constructor(
             fun num(at: Int): Long? = if (at + width > d.size) null else (0 until width).fold(0L) { acc, k -> acc or ((d[at + k].toLong() and 0xFF) shl (8 * k)) }
             val current = num(5 + width) ?: return null
             var at = 5 + 2 * width
-            if (at >= d.size) return PropDesc(current, null, null, emptyList())
+            if (at >= d.size) return PropDesc(current, null, null, emptyList(), width)
             val form = d[at].toInt()
             at += 1
             return when (form) {
-                1 -> PropDesc(current, num(at), num(at + width), emptyList())
+                1 -> PropDesc(current, num(at), num(at + width), emptyList(), width)
                 2 -> {
-                    if (at + 2 > d.size) return PropDesc(current, null, null, emptyList())
+                    if (at + 2 > d.size) return PropDesc(current, null, null, emptyList(), width)
                     val n = (d[at].toInt() and 0xFF) or ((d[at + 1].toInt() and 0xFF) shl 8)
-                    PropDesc(current, null, null, (0 until n).mapNotNull { num(at + 2 + it * width) })
+                    PropDesc(current, null, null, (0 until n).mapNotNull { num(at + 2 + it * width) }, width)
                 }
-                else -> PropDesc(current, null, null, emptyList())
+                else -> PropDesc(current, null, null, emptyList(), width)
             }
         }
 

@@ -105,7 +105,12 @@ while its Wi-Fi is on; the app reconnects Bluetooth directly when you close Phot
   and exposure compensation with their current values between − and +, ISO from the camera's own
   list, a **Focus** button (half press and hold; tap again to let go) and the shutter. The values
   follow the camera as its dials turn. A dial set to a value wins: the app shows it but can't
-  change it.
+  change it, and in modes A, S and P the value the camera picks is dimmed. **Settings** changes the
+  camera's film simulation, white balance, focus mode, image quality and self-timer, from the
+  values the camera offers. Tapping the live view focuses there, on the camera's own focus grid.
+
+While the camera is plugged in by USB it answers Bluetooth backups with "busy" and won't start its
+Wi-Fi, so the app says so and asks you to unplug it instead of retrying.
 
 What Bluetooth alone can do: the shutter release (half press to focus, full press to shoot), the
 clock, location, and the settings this app already writes. Fujifilm's Bluetooth service has no
@@ -222,7 +227,8 @@ every write is a write with response. Every UUID, with its source, is in
   then name/size/date through `GetObjectPropValue` (`0xDC07`/`0xDC04`/`0xDC08`); an X100VI answers
   those with "parameter not supported", so the app falls back to `GetObjectInfo` with `0xD227 = 1`
   (Fujifilm's packed layout: size an unaligned u32 at 13, name at 52). Thumbnails `GetThumb`, files
-  `GetPartialObject` in 1 MB windows. Remote: `0xDF00 = 6`, `0xDF01 = 22`, `InitiateOpenCapture`, the
+  `GetPartialObject` in 1 MB windows, each right after that picture's `GetObjectInfo`: otherwise an
+  X100VI never answers `GetThumb` (as libfuji notes for newer bodies). Remote: `0xDF00 = 6`, `0xDF01 = 22`, `InitiateOpenCapture`, the
   live view on port 55742 (18-byte header + JPEG per frame), the step operations
   `0x902C`/`0x902D`/`0x902E`, the event list polled every 0.6 s. Shutter speed is `0xD240` (top bits
   `10`: 1/(value/1000) s; otherwise value/1000 s), as XApp's remote shows it; focus is `LockS1Lock`

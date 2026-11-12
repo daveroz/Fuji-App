@@ -9,8 +9,11 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import androidx.core.view.isVisible
+import androidx.lifecycle.lifecycleScope
 import com.fujiapp.remote.wifi.CardPhoto
+import com.fujiapp.remote.wifi.FujiWifi
 import com.fujiapp.remote.wifi.WifiPhase
+import kotlinx.coroutines.launch
 
 /** Browse the card and import pictures, over the camera's Wi-Fi. */
 class PhotosScreen(private val a: MainActivity) {
@@ -150,6 +153,39 @@ class RemoteScreen(private val a: MainActivity) {
     }
     private var shownReadings: Map<String, String>? = null
     private var markerAt: Pair<Float, Float>? = null
+    private val settingsButton = Kit.button(c, "Settings", Kit.Style.QUIET) { openSettings() }
+    private val shutterRow = stepper("Shutter speed", shutterValue, { a.wifi.stepShutter(false) }, { a.wifi.stepShutter(true) })
+    private val apertureRow = stepper("Aperture", apertureValue, { a.wifi.stepAperture(false) }, { a.wifi.stepAperture(true) })
+
+    /** The camera's own settings, as XApp's remote offers them. */
+    private val settings = listOf(
+        FujiWifi.FILM_SIMULATION to "Film simulation",
+        FujiWifi.WHITE_BALANCE to "White balance",
+        FujiWifi.FOCUS_MODE to "Focus mode",
+        FujiWifi.IMAGE_QUALITY to "Image quality",
+        FujiWifi.SELF_TIMER to "Self-timer",
+    )
+
+    private fun openSettings() {
+        if (a.wifi.phase.value != WifiPhase.Remote) return
+        val items = settings.map { (p, title) -> "$title: ${a.wifi.currentValue(p)?.let { settingLabel(p, it) } ?: "—"}" }
+        a.choose("Camera settings", items, -1) { i -> pickSetting(settings[i].first, settings[i].second) }
+    }
+
+    private fun pickSetting(property: Int, title: String) {
+        a.lifecycleScope.launch {
+            val desc = a.wifi.describeSetting(property)
+            val values = desc?.values.orEmpty()
+            if (desc == null || values.isEmpty()) {
+                a.showNotice("The camera doesn't offer a choice for $title right now.")
+                return@launch
+            }
+            val current = a.wifi.currentValue(property) ?: desc.current
+            a.choose(title, values.map { settingLabel(property, it) }, values.indexOf(current)) { i ->
+                a.wifi.setSetting(property, values[i], desc.width, title)
+            }
+        }
+    }
 
     val view: View = Kit.page(c, Kit.column(c).apply {
         addView(Kit.row(c).apply {
@@ -157,6 +193,7 @@ class RemoteScreen(private val a: MainActivity) {
                 addView(Kit.label(c, "Over Wi-Fi", Deco.DIM))
                 addView(Kit.text(c, "Remote", 26f), Kit.lp(top = Deco.dpi(c, 6)))
             }, Kit.lp(0, weight = 1f))
+            addView(settingsButton)
             addView(Kit.button(c, "Close", Kit.Style.QUIET) { a.closeCameraPage() })
         })
         addView(status, Kit.lp(top = Deco.dpi(c, 6)))
@@ -164,9 +201,9 @@ class RemoteScreen(private val a: MainActivity) {
         addView(frame, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 216)).apply { topMargin = Deco.dpi(c, 8) })
         addView(mode, Kit.lp(top = Deco.dpi(c, 6)))
         addView(Kit.panel(c, padV = 0).apply {
-            addView(stepper("Shutter speed", shutterValue, { a.wifi.stepShutter(false) }, { a.wifi.stepShutter(true) }))
+            addView(shutterRow)
             addView(Kit.hairline(c))
-            addView(stepper("Aperture", apertureValue, { a.wifi.stepAperture(false) }, { a.wifi.stepAperture(true) }))
+            addView(apertureRow)
             addView(Kit.hairline(c))
             addView(stepper("Exposure", exposureValue, { a.wifi.stepExposure(false) }, { a.wifi.stepExposure(true) }))
             addView(Kit.hairline(c))
@@ -274,6 +311,11 @@ class RemoteScreen(private val a: MainActivity) {
         status.setTextColor(if (phase is WifiPhase.Failed) Deco.RED else Deco.MUTED)
         val ready = phase == WifiPhase.Remote
         Kit.setEnabled(focusButton, ready)
+        Kit.setEnabled(settingsButton, ready)
+        // In P and A the camera picks the shutter speed; in P and S, the aperture.
+        val exposureMode = w.currentValue(FujiWifi.SHOOTING_MODE)
+        shutterRow.alpha = if (exposureMode == 2L || exposureMode == 3L) 0.5f else 1f
+        apertureRow.alpha = if (exposureMode == 2L || exposureMode == 4L) 0.5f else 1f
         val focused = w.focused.value
         focusButton.text = if (focused) "Let go of focus" else "Focus"
         if (focused) marker.alpha = 1f else if (!ready) marker.isVisible = false
@@ -313,3 +355,29 @@ private class TapImageView(c: android.content.Context) : androidx.appcompat.widg
 
     override fun performClick(): Boolean = super.performClick()
 }
+
+/** A readable name for a camera setting's value; the number when it isn't known. */
+internal fun settingLabel(property: Int, v: Long): String = when (property) {
+    FujiWifi.FILM_SIMULATION -> com.fujiapp.remote.recipe.FilmSim.of(v.toInt())?.label
+    FujiWifi.WHITE_BALANCE -> com.fujiapp.remote.recipe.WhiteBalance.entries.firstOrNull { it.code.toLong() == v }?.label
+    FujiWifi.FOCUS_MODE -> when (v) {
+        1L -> "Manual"
+        0x8001L -> "Single AF (AF-S)"
+        0x8002L -> "Continuous AF (AF-C)"
+        else -> null
+    }
+    FujiWifi.IMAGE_QUALITY -> when (v) {
+        1L -> "RAW"
+        2L -> "Fine"
+        3L -> "Normal"
+        4L -> "RAW + Fine"
+        5L -> "RAW + Normal"
+        else -> null
+    }
+    FujiWifi.SELF_TIMER -> when {
+        v == 0L -> "Off"
+        v % 1000 == 0L -> "${v / 1000} s"
+        else -> null
+    }
+    else -> null
+} ?: "Setting 0x%X".format(v)
