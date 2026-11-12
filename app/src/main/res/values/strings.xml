@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Fuji Remote</string>
+
+    <string name="connect">Connect to camera</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="live_view">Live view &amp; remote</string>
+    <string name="recipes_title">Film recipes</string>
+
+    <string name="status_disconnected">Not connected</string>
+    <string name="howto_title">Before you connect</string>
+    <string name="howto_body">1. On the camera, start the wireless connection / remote mode.\n2. On your phone, join the camera’s WiFi network (Settings ▸ WiFi).\n3. Tap Connect, then press OK on the camera when it asks.</string>
+
+    <string name="shutter">Shutter</string>
+    <string name="capture">Capture</string>
+    <string name="shutter_up">Shutter +</string>
+    <string name="shutter_down">Shutter −</string>
+    <string name="aperture_up">Aperture +</string>
+    <string name="aperture_down">Aperture −</string>
+    <string name="ev_up">EV +</string>
+    <string name="ev_down">EV −</string>
+    <string name="start_live">Start live view</string>
+    <string name="stop_live">Stop live view</string>
+
+    <string name="backup_current">Back up current look</string>
+    <string name="no_recipes">No saved recipes yet. Connect to the camera and back up its current look.</string>
+    <string name="restore">Apply to camera</string>
+    <string name="share">Share</string>
+    <string name="delete">Delete</string>
+    <string name="recipe_name_hint">Recipe name</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="not_connected_hint">Connect to the camera first.</string>
+</resources>
