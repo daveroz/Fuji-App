@@ -3,6 +3,7 @@ package com.fujiapp.remote
 import com.fujiapp.remote.preview.PreviewSource
 import com.fujiapp.remote.preview.RecipePreview
 import com.fujiapp.remote.preview.SampleScene
+import com.fujiapp.remote.preview.Vectorscope
 import com.fujiapp.remote.recipe.FilmSim
 import com.fujiapp.remote.recipe.Recipe
 import com.fujiapp.remote.recipe.WhiteBalance
@@ -31,5 +32,20 @@ class PreviewTest {
         val neutral = blueMinusRed(render(Recipe("N", FilmSim.PROVIA)))
         val tungsten = blueMinusRed(render(Recipe("T", FilmSim.PROVIA, whiteBalance = WhiteBalance.KELVIN, kelvin = 3200)))
         assertTrue(tungsten > neutral + 20)
+    }
+
+    @Test fun skin_tones_sit_on_the_vectorscope_skin_line() {
+        for (rgb in SampleScene.SKIN) {
+            val r = ((rgb shr 16) and 0xFF) / 255.0
+            val g = ((rgb shr 8) and 0xFF) / 255.0
+            val b = (rgb and 0xFF) / 255.0
+            val cb = -0.1146 * r - 0.3854 * g + 0.5 * b
+            val cr = 0.5 * r - 0.4542 * g - 0.0458 * b
+            val angle = Math.toDegrees(kotlin.math.atan2(cr, cb))
+            assertTrue("skin #%06X at %.1f°".format(rgb, angle), kotlin.math.abs(angle - Vectorscope.SKIN_LINE_DEG) < 12)
+        }
+        val out = IntArray(64 * 64)
+        Vectorscope.render(source.pixels, 64, out)
+        assertTrue(out.any { (it ushr 24) != 0 })
     }
 }

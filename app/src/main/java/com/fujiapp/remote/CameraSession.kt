@@ -678,6 +678,13 @@ class CameraSession(context: Context) {
         if (!started) _recipes.value = previous
     }
 
+    /** Ask the connected camera to start its Wi-Fi for [function]; its network name and password. */
+    suspend fun wakeWifi(function: Int): FujiCamera.CameraWifi {
+        val cam = camera ?: throw IOException("Connect to the camera over Bluetooth first.")
+        AppLog.add("wifi: wake (function $function)")
+        return opLock.withLock { cam.wakeWifi(function) }
+    }
+
     /** The slots changed over USB: what was read over Bluetooth is out of date. */
     fun forgetRecipes() {
         if (_recipes.value !is RecipesState.Loading) _recipes.value = RecipesState.Idle

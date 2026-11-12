@@ -348,8 +348,44 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
         }
     }
 
+    /** The camera's Wi-Fi network, as Bluetooth hands it over. */
+    class CameraWifi(val ssid: String, val password: String)
+
+    /**
+     * Ask the camera to start its Wi-Fi for [function] (see [FujiGatt.FUNCTION_LAUNCH]) and return
+     * its network name and password. The camera answers on AP_STATE a few seconds later: 1 = up,
+     * 0 = busy (XApp waits 200 ms and asks again). The SSID is hidden while Bluetooth started it.
+     */
+    suspend fun wakeWifi(function: Int): CameraWifi {
+        if (!gatt.has(FujiGatt.FUNCTION_LAUNCH)) throw UnsupportedCameraException("This camera can't start its Wi-Fi from Bluetooth.")
+        val ssid = FujiProtocol.string(gatt.read(FujiGatt.CAMERA_NAME))?.trim().orEmpty()
+        gatt.drain(FujiGatt.AP_STATE)
+        gatt.write(FujiGatt.FUNCTION_LAUNCH, FujiProtocol.le16(function))
+        val password = runCatching { FujiProtocol.string(gatt.read(FujiGatt.WIFI_PASSWORD, secret = true))?.trim() }.getOrNull().orEmpty()
+        var busy = 0
+        while (true) {
+            val answer = gatt.awaitValue(FujiGatt.AP_STATE, WIFI_ANSWER_MS)
+            if (answer == null) {
+                log("Wi-Fi: no answer within ${WIFI_ANSWER_MS / 1000} s, trying anyway")
+                break
+            }
+            val state = FujiProtocol.u16(answer)?.and(0x7FFF) ?: answer.firstOrNull()?.toInt()
+            log("Wi-Fi: AP state $state")
+            if (state != 0) break
+            if (++busy >= 3) throw CameraBusyException("The camera is busy. Leave its menus or playback and try again.")
+            delay(200)
+            gatt.write(FujiGatt.FUNCTION_LAUNCH, FujiProtocol.le16(function))
+        }
+        if (ssid.isEmpty()) throw GattException("The camera didn't give its Wi-Fi name.")
+        return CameraWifi(ssid, password)
+    }
+
     companion object {
         const val SHUTTER_RELEASE = 0
+        /** Function codes for [wakeWifi]. */
+        const val WIFI_VIEW_IMAGES = 3
+        const val WIFI_REMOTE = 4
+        private const val WIFI_ANSWER_MS = 12_000L
         const val SHUTTER_HALF = 1
         const val SHUTTER_FULL = 2
 

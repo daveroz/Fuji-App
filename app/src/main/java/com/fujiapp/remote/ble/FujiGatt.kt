@@ -89,6 +89,8 @@ object FujiGatt {
     val SVC_CAMERA_SETTING: UUID = uuid("4e941240-d01d-46b9-a5ea-67636806830b")
     /** The camera's NAME setting, e.g. "FUJIFILM-X100VI-1A2B". Notifies. */
     val CAMERA_NAME = GattChar(SVC_CAMERA_SETTING, uuid("bf6dc9cf-3606-4ec9-a4c8-d77576e93ea4"), "Camera name")
+    /** ASCII: the password of the camera's Wi-Fi (its network name is [CAMERA_NAME]). Never logged. */
+    val WIFI_PASSWORD = GattChar(SVC_CAMERA_SETTING, uuid("e809256a-915c-4967-92e8-53b7d4cad213"), "Wi-Fi password")
     val LOGGING_SETTING = GattChar(SVC_CAMERA_SETTING, uuid("75823784-fbb7-4b71-abae-cd9a34072e3c"), "Logging setting")
     /** Number of phones paired with the camera (first byte). */
     val PAIRING_SMART_DEVICE_NUM = GattChar(SVC_CAMERA_SETTING, uuid("8814441b-1d7b-4046-891d-d8f80864cc8e"), "Paired phones")
@@ -137,6 +139,13 @@ object FujiGatt {
     val LOG_TRANSFER_REQUEST = GattChar(SVC_CAMERA_CONTROL, uuid("2674f0b0-f909-4e73-8656-338e9c74457f"), "Log transfer request")
     /** uint16: 1 = half press (focus), 2 = full press, 0 = release (firmware parser, MaxRink/furble). */
     val SHOOTING_REQUEST = GattChar(SVC_CAMERA_CONTROL, uuid("7fcf49c6-4ff0-4777-a03d-1a79166af7a8"), "Shutter")
+    /**
+     * uint16: start the camera's Wi-Fi for a function (XApp's FUNCTION_LAUNCH_REQUEST): 1 import,
+     * 3 in-camera viewing (what XApp asks for to browse and import), 4 remote shooting, 5 firmware.
+     * The camera answers on [AP_STATE]: 1 = its access point is up, 0 = busy. From fuji-bridge
+     * (`FujiBluetooth.swift`) and libfuji (`lib/bluetooth.c`).
+     */
+    val FUNCTION_LAUNCH = GattChar(SVC_CAMERA_CONTROL, uuid("600655e6-3637-42f1-8fb2-44efc5c63b13"), "Wi-Fi launch")
 
     // ---- Current time and location ----
 
@@ -197,7 +206,7 @@ object FujiGatt {
         DEVICE_IDENTIFICATION_NUMBER, CONNECTED_DEVICE_NAME, DATE_SYNC_STATE, LOCATION_SYNC_STATE, BACKUP_STATE,
         RESTORE_STATE, LOG_TRANSFER_STATE, BACKUP_REQUEST, RESTORE_REQUEST, LOG_TRANSFER_REQUEST, SHOOTING_REQUEST,
         UTC_AND_TIMEZONE, LOCATION_AND_SPEED, FILE_TRANSFER_INDEX, FILE_INFORMATION, FILE_PARTIAL_SIZE,
-        FILE_PARTIAL_DATA, FILE_TRANSFER_RESULT, FILE_TRANSACTION_STATE, FILE_NUMBER,
+        FILE_PARTIAL_DATA, FILE_TRANSFER_RESULT, FILE_TRANSACTION_STATE, FILE_NUMBER, WIFI_PASSWORD, FUNCTION_LAUNCH,
     )
 
     val SERVICE_NAMES: Map<UUID, String> = mapOf(

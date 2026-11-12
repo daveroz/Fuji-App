@@ -119,7 +119,6 @@ data class CameraVitals(
                     "Lens changes" to n(lensChanges),
                 ),
             ),
-            CameraInfo.Section("Error log", rows("Errors" to errorLog?.trim())),
         ).filter { it.rows.isNotEmpty() }
     }
 

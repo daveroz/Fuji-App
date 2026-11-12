@@ -55,6 +55,14 @@ class MainActivity : AppCompatActivity() {
     val transfer: com.fujiapp.remote.usb.RecipeTransfer get() = (application as App).transfer
     val myRecipes: com.fujiapp.remote.recipe.MyRecipes get() = (application as App).myRecipes
     val recipeFlow: RecipeFlow by lazy { RecipeFlow(this) }
+    val wifi: com.fujiapp.remote.wifi.WifiSession get() = (application as App).wifi
+
+    /** What the Camera tab shows while connected: its status, or a Wi-Fi page. */
+    enum class CameraPage { STATUS, PHOTOS, REMOTE }
+    private var cameraPage = CameraPage.STATUS
+    private lateinit var photosScreen: PhotosScreen
+    private lateinit var remoteScreen: RemoteScreen
+    private var afterWifiGrant: (() -> Unit)? = null
 
     private enum class Tab(val title: String) {
         CAMERA("Camera"), RECIPES("Recipes"), EQUIPMENT("Equipment"), BACKUPS("Backups"), SETTINGS("Settings")
@@ -129,6 +137,8 @@ class MainActivity : AppCompatActivity() {
         connectScreen = ConnectScreen(this)
         statusScreen = StatusScreen(this)
         recipesScreen = RecipesScreen(this)
+        photosScreen = PhotosScreen(this)
+        remoteScreen = RemoteScreen(this)
         equipmentScreen = EquipmentScreen(this)
         backupsScreen = BackupsScreen(this)
         settingsScreen = SettingsScreen(this)
@@ -140,8 +150,13 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
-                    merge(session.state, session.vitals, session.backup, session.restore, session.recipes, transfer.state)
-                        .collect { render() }
+                    merge(
+                        session.state, session.vitals, session.backup, session.restore, session.recipes, transfer.state,
+                        wifi.phase, wifi.photos, wifi.progress, wifi.readings,
+                    ).collect { render() }
+                }
+                launch {
+                    wifi.frame.collect { if (cameraPage == CameraPage.REMOTE) remoteScreen.showFrame(it) }
                 }
                 launch {
                     session.notice.collect { message ->
@@ -295,7 +310,12 @@ class MainActivity : AppCompatActivity() {
         statusText.text = label
 
         val view = when (tab) {
-            Tab.CAMERA -> if (connected != null) statusScreen.view else connectScreen.view
+            Tab.CAMERA -> when {
+                connected == null -> connectScreen.view
+                cameraPage == CameraPage.PHOTOS -> photosScreen.view
+                cameraPage == CameraPage.REMOTE -> remoteScreen.view
+                else -> statusScreen.view
+            }
             Tab.RECIPES -> recipesScreen.view
             Tab.EQUIPMENT -> equipmentScreen.view
             Tab.BACKUPS -> backupsScreen.view
@@ -307,7 +327,12 @@ class MainActivity : AppCompatActivity() {
             shown = view
         }
         when (tab) {
-            Tab.CAMERA -> if (connected != null) statusScreen.render(connected, session.vitals.value) else connectScreen.render(state)
+            Tab.CAMERA -> when {
+                connected == null -> connectScreen.render(state)
+                cameraPage == CameraPage.PHOTOS -> photosScreen.render()
+                cameraPage == CameraPage.REMOTE -> remoteScreen.render()
+                else -> statusScreen.render(connected, session.vitals.value)
+            }
             Tab.RECIPES -> recipesScreen.render(state, session.recipes.value, session.vitals.value)
             Tab.EQUIPMENT -> equipmentScreen.render(state, session.vitals.value)
             Tab.BACKUPS -> backupsScreen.render(state, session.backup.value, session.restore.value)
@@ -396,6 +421,45 @@ class MainActivity : AppCompatActivity() {
     // ---- recipes ----
 
     fun showRecipes() = select(Tab.RECIPES)
+
+    // ---- photos and remote over Wi-Fi ----
+
+    private val wifiPermission =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+            val action = afterWifiGrant
+            afterWifiGrant = null
+            if (results.values.all { it }) action?.invoke()
+            else showNotice("Photos and remote need permission to connect to the camera's Wi-Fi (Nearby devices).")
+        }
+
+    fun openCameraPage(page: CameraPage) {
+        val needed = when {
+            Build.VERSION.SDK_INT >= 33 -> listOf("android.permission.NEARBY_WIFI_DEVICES")
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+            else -> emptyList()
+        }.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (needed.isNotEmpty()) {
+            afterWifiGrant = { openCameraPage(page) }
+            wifiPermission.launch(needed.toTypedArray())
+            return
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            showNotice("On this Android version, join the camera's Wi-Fi in Settings first.")
+        }
+        cameraPage = page
+        when (page) {
+            CameraPage.PHOTOS -> wifi.openPhotos()
+            CameraPage.REMOTE -> wifi.openRemote()
+            CameraPage.STATUS -> Unit
+        }
+        render()
+    }
+
+    fun closeCameraPage() {
+        wifi.close()
+        cameraPage = CameraPage.STATUS
+        render()
+    }
 
     fun refreshBackups() = backupsScreen.refreshList()
 

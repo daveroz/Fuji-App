@@ -189,10 +189,11 @@ class GattClient(
     private fun require(c: GattChar): BluetoothGattCharacteristic =
         find(c) ?: throw GattException("The camera has no ${c.name} characteristic.")
 
-    suspend fun read(c: GattChar): ByteArray {
+    /** Read [c]; a [secret] value (the Wi-Fi password) is left out of the log. */
+    suspend fun read(c: GattChar, secret: Boolean = false): ByteArray {
         val ch = require(c)
         val value = op("read ${c.name}") { started(it.readCharacteristic(ch)) } ?: ByteArray(0)
-        log("read ${c.name}: ${FujiProtocol.hex(value)}")
+        log(if (secret) "read ${c.name}: ${value.size} bytes (not logged)" else "read ${c.name}: ${FujiProtocol.hex(value)}")
         return value
     }
 

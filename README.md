@@ -4,8 +4,10 @@ An open-source Android companion for Fujifilm cameras. It's built for the **X100
 1.30 and later, with Fujifilm's "secure" Bluetooth pairing). Everyday use is **Bluetooth LE**, and it
 covers what Fujifilm's XApp does over Bluetooth, without the clutter. Loading recipes into the
 camera's custom slots uses a **USB-C cable**, the only way the camera accepts them one slot at a time.
+**Photos** and **remote shooting** use the camera's own **Wi-Fi**, started from Bluetooth as XApp does.
 
-- **Camera**: live status of everything the camera reports, plus a remote shutter release
+- **Camera**: live status of everything the camera reports, a remote shutter release, and
+  **Photos** (browse the card, import) and **Remote** (live view, exposure, shutter) over Wi-Fi
 - **Recipes**: the C1–C7 custom settings on the camera; a library of 30 recipes after film stocks
   and films; a **Lab** to try settings on a picture; and loading any recipe into a slot (over USB,
   after a backup)
@@ -14,7 +16,7 @@ camera's custom slots uses a **USB-C cable**, the only way the camera accepts th
 - **Settings**: clock sync, optional location sync (geotagging), the camera's Bluetooth settings,
   and the **log**
 
-No Wi-Fi, no live view, no account, no ads. **No camera firmware is decompiled, modified, flashed,
+No account, no ads, no cloud. **No camera firmware is decompiled, modified, flashed,
 or redistributed.**
 
 ---
@@ -23,9 +25,9 @@ or redistributed.**
 
 | Tab | What's on it |
 |---|---|
-| **Camera** | Before connecting: find and pair a camera, or reconnect to a paired one. Connected: a readout strip (shots, power, Wi-Fi, firmware), the **remote release** (hold to focus, let go to shoot), and every value the camera reports, decoded and kept live. **State:** power switch, Wi-Fi access point, pictures waiting, why it's busy, card, firmware update. **Camera:** model, name, serial, firmware, model code. **Connection:** paired phones, connect while off, location sync and interval, transfer settings, activity log. **Lens**, and **Technical** details. |
-| **Recipes** | Three sections. **Camera**: the C1–C7 names, read over Bluetooth from the camera's settings file when you open it (about 2 seconds; offline, the newest backup stands in), and, over USB, every setting of every slot. **Library**: 30 recipes after popular film stocks (Portra, Ektar, Gold, Kodachrome, Superia, Pro 400H, Velvia, CineStill, Tri-X, HP5…) and films (Blade Runner 2049, Skyfall, The Matrix, Fury Road, Drive, Amélie, In the Mood for Love, Dune…), each with what the look is, how the settings get there, and how to shoot it. **Lab**: every setting on sliders over a sample picture or one of your photos, with a live preview; save the result to My recipes. Any recipe can be loaded into a slot. |
-| **Equipment** | Total shots, shutter actuations against the rated shutter life, and all of the camera's usage counters: power-ons, operating, shooting and viewfinder time, viewfinder switches, flash, half-presses, OK and command-dial use, sensor cleanings, heat warnings and shutdowns, time spent with the sensor hot, battery, USB and lens counts, and the camera's error log. |
+| **Camera** | Before connecting: find and pair a camera, or reconnect to a paired one. Connected: a drawing of the camera, the **Photos** and **Remote** tiles (Wi-Fi, see below), a readout strip (shots, power, Wi-Fi, firmware), the **remote release** (hold to focus, let go to shoot), and every value the camera reports, decoded and kept live. **State:** power switch, Wi-Fi access point, pictures waiting, why it's busy, card, firmware update. **Camera:** model, name, serial, firmware, model code. **Connection:** paired phones, connect while off, location sync and interval, transfer settings, activity log. **Lens**, and **Technical** details. |
+| **Recipes** | Three sections. **Camera**: the C1–C7 names, read over Bluetooth from the camera's settings file when you open it (about 2 seconds; offline, the newest backup stands in), and, over USB, every setting of every slot. **Library**: 30 recipes after popular film stocks (Portra, Ektar, Gold, Kodachrome, Superia, Pro 400H, Velvia, CineStill, Tri-X, HP5…) and films (Blade Runner 2049, Skyfall, The Matrix, Fury Road, Drive, Amélie, In the Mood for Love, Dune…), each with what the look is, how the settings get there, and how to shoot it. **Lab**: the preview stays on screen while the settings, in five tabs (Film, Color, Light, Tone, Detail), change it; the sample is a color chart (the 24 color-checker patches, eight skin tones, a grey ramp) or one of your photos, and a **vectorscope** in the manner of DaVinci Resolve's shows where every color lands, with the **skin-tone line** to check skin against; save the result to My recipes. Any recipe can be loaded into a slot. |
+| **Equipment** | Total shots, shutter actuations against the rated shutter life, and all of the camera's usage counters: power-ons, operating, shooting and viewfinder time, viewfinder switches, flash, half-presses, OK and command-dial use, sensor cleanings, heat warnings and shutdowns, time spent with the sensor hot, battery, USB and lens counts. |
 | **Backups** | Back up the camera's settings file, restore it to the same model, share it, delete it. |
 | **Settings** | **Set the camera clock** (on by default, as XApp does). The camera's **Location sync** (see below), **location interval** and **Connect while power off** settings, written straight to the camera. **Log**: save, share, clear. |
 
@@ -63,6 +65,24 @@ What's possible, and how:
 > the camera's limited warranty ([Fuji X Weekly, 2026-06-08](https://fujixweekly.com/2026/06/08/your-cameras-warranty-might-be-voided/)).
 > That covers this app, XApp alternatives and every recipe uploader. Laws differ by country.
 
+### Photos and remote over Wi-Fi
+
+**Photos** and **Remote** on the Camera tab work like XApp's: the app asks the camera over
+Bluetooth to start its Wi-Fi, reads the network's name and password, and joins it for this app
+only (Android asks you to confirm; the phone keeps its normal connection for everything else).
+Then press **OK** on the camera to allow the connection.
+
+- **Photos** lists the card, newest first, with the camera's own thumbnails. Select pictures and
+  import them, or import the newest ten; they land in **Pictures/Fuji Remote** (RAW and video in
+  Downloads). A picture already imported isn't copied again.
+- **Remote** shows the live view and takes pictures, with shutter speed, aperture and exposure
+  compensation one step at a time and ISO from the camera's own list. On the X100VI the shutter
+  speed and aperture follow the dials and the aperture ring: set them to **A** to change them here.
+
+What Bluetooth alone can do: the shutter release (half press to focus, full press to shoot), the
+clock, location, and the settings this app already writes. Fujifilm's Bluetooth service has no
+ISO, shutter speed or aperture; those, and the live view, need the Wi-Fi remote.
+
 ### Location sync
 
 Location sync is the camera's own setting. While it's on, the camera asks the phone for its
@@ -82,6 +102,9 @@ stage in haze, glass panels with hairline edges, one amber key light ("lit" mean
 bold capital labels, set in **Carbon+** like Worldly, SAB Monitor and the Deco launcher
 (`app/src/main/assets/fonts/`). The layout borrows the restraint of medium-format camera software:
 generous margins, big numerals for the readings that matter, small labels and hairline rules.
+
+The launcher icon is Mount Fuji in the same family as Worldly's and the Deco launcher's icons
+(rendered from `assets/icon-*.svg` by `assets/render-icons.js`).
 
 Behind every screen is Worldly's stage: two slow washes of amber light, fog banks drifting
 through, a row of ceiling lamps running a slow chase, and fine grain. It animates only while the
@@ -162,6 +185,16 @@ every write is a write with response. Every UUID, with its source, is in
   meaning. The backup over USB is `GetObjectInfo(0)` / `GetObject(0)`; it's stored compressed like a
   Bluetooth backup. Facts from [`zgrimz/fujifilm-ptp-reference`](https://github.com/zgrimz/fujifilm-ptp-reference)
   (CC BY 4.0), implemented independently.
+- **Wi-Fi**: `600655e6` (function launch) takes `03 00` to browse and import or `04 00` for remote
+  shooting; the camera answers on AP state (`a68e3f66`), 1 up, 0 busy. The network name is the
+  camera name (`bf6dc9cf`), the password `e809256a` (never logged). Over TCP `192.168.0.1:55740` the
+  same PTP containers as over USB follow an 82-byte init; after OpenSession the camera waits for OK
+  (`0xDF00` in the event list `0xD212`). Import: client state `0xDF01 = 20`, the handle list
+  `0xD621`, name/size/date through `GetObjectPropValue` (`0xDC07`/`0xDC04`/`0xDC08`), thumbnails
+  `GetThumb`, files through `GetPartialObject` in 1 MB windows. Remote: `0xDF00 = 6`, `0xDF01 = 22`,
+  `InitiateOpenCapture`, the live view on port 55742 (18-byte header + JPEG per frame), the step
+  operations `0x902C`/`0x902D`/`0x902E`. After fuji-bridge (import, tested on an X100VI) and libfuji
+  (remote); both MIT.
 - **Recovery**: connecting retries up to 3 times, a dropped link reconnects on its own, and backups
   and shutter-count reads retry once on a fresh connection. A restore never retries on its own.
 
@@ -206,7 +239,10 @@ app/src/main/java/com/fujiapp/remote/
 ├── recipe/                Recipe (every slot setting), BankCodec (USB values and write order, tested),
 │                          RecipeLibrary (the 30 recipes), MyRecipes (saved from the Lab)
 ├── usb/                   Ptp (containers, tested), UsbCamera (USB host PTP: slots, backup), RecipeTransfer
-├── preview/               RecipePreview (the Lab's approximate rendering), SampleScene (the sample picture)
+├── wifi/                  FujiWifi (Fujifilm PTP over TCP: init, OK, gallery, import, remote, live view),
+│                          WifiJoin (the camera's network, for this app only), WifiSession
+├── preview/               RecipePreview (the Lab's approximate rendering), SampleScene (the color chart),
+│                          Vectorscope (with the skin-tone line)
 ├── data/BackupStore.kt    Backups in app storage (.dat as received + .json metadata)
 ├── util/                  AppLog (recorder), LogExporter (Downloads), AppSettings, PhoneLocation
 ├── CameraSession.kt       Scan → connect → pair → register → live status / features / transfers

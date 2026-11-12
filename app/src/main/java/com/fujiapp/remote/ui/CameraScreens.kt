@@ -29,6 +29,7 @@ class ConnectScreen(private val a: MainActivity) {
     private val found = Kit.column(c)
 
     val view: View = Kit.page(c, Kit.column(c).apply {
+        addView(CameraArt(c).apply { lit = false }, Kit.lp(top = Deco.dpi(c, 4)))
         addView(Kit.label(c, "Bluetooth", Deco.DIM), Kit.lp(top = Deco.dpi(c, 12)))
         addView(Kit.text(c, "Connect your camera", 30f), Kit.lp(top = Deco.dpi(c, 12)))
         addView(
@@ -118,7 +119,12 @@ class StatusScreen(private val a: MainActivity) {
     private val remoteCard = Kit.column(c)
 
     val view: View = Kit.page(c, Kit.column(c).apply {
-        addView(strip, Kit.lp(top = Deco.dpi(c, 8)))
+        addView(CameraArt(c), Kit.lp(top = Deco.dpi(c, 2)))
+        addView(Kit.row(c).apply {
+            addView(tile("Photos", "Browse and import over Wi-Fi") { a.openCameraPage(MainActivity.CameraPage.PHOTOS) }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
+            addView(tile("Remote", "Live view, exposure, shutter") { a.openCameraPage(MainActivity.CameraPage.REMOTE) }, Kit.lp(0, weight = 1f))
+        }, Kit.lp(top = Deco.dpi(c, 14)))
+        addView(strip, Kit.lp(top = Deco.dpi(c, 14)))
         addView(remoteCard)
         addView(sections)
         addView(Kit.row(c).apply {
@@ -166,6 +172,16 @@ class StatusScreen(private val a: MainActivity) {
         remoteCard.visibility = if (state.hasShutter) View.VISIBLE else View.GONE
         sections.removeAllViews()
         s.sections().forEach { sections.addView(Kit.sectionPanel(c, it)) }
+    }
+
+    /** A feature tile, like XApp's home: a lit title and a line under it. */
+    private fun tile(title: String, detail: String, onClick: () -> Unit): View = Kit.column(c).apply {
+        background = Deco.pressable(Deco.glass(c, 18f), Deco.box(c, Deco.SURFACE_HI, Deco.BORDER_STRONG, 18f))
+        setPadding(Deco.dpi(c, 16), Deco.dpi(c, 16), Deco.dpi(c, 16), Deco.dpi(c, 16))
+        addView(Kit.label(c, title, Deco.AMBER_LIGHT, 12f))
+        addView(Kit.text(c, detail, 13f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 8)))
+        isClickable = true
+        setOnClickListener { onClick() }
     }
 
     /** A round shutter: amber ring, lit while held. Half press on touch, full press on release. */
