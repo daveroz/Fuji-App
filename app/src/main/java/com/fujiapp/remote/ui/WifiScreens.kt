@@ -22,8 +22,10 @@ class PhotosScreen(private val a: MainActivity) {
     private val progress = Kit.progress(c)
     private val grid = Kit.column(c)
     private val selected = LinkedHashSet<Int>()
-    private val importSelected = Kit.button(c, "Import selected") { importNow(selectedPhotos()) }
-    private val importNewest = Kit.button(c, "Newest 10", Kit.Style.SECONDARY) { importNow(a.wifi.photos.value.take(10).map { it.photo }) }
+    // Chosen pictures are imported even if they were before (a damaged copy can be replaced);
+    // "Newest 10" skips the ones already on the phone.
+    private val importSelected = Kit.button(c, "Import selected") { importNow(selectedPhotos(), again = true) }
+    private val importNewest = Kit.button(c, "Newest 10", Kit.Style.SECONDARY) { importNow(a.wifi.photos.value.take(10).map { it.photo }, again = false) }
     private val more = Kit.button(c, "Load more", Kit.Style.QUIET) { a.wifi.loadMore() }
     private var shown: List<CardPhoto>? = null
 
@@ -47,12 +49,12 @@ class PhotosScreen(private val a: MainActivity) {
 
     private fun selectedPhotos() = a.wifi.photos.value.filter { it.photo.handle in selected }.map { it.photo }
 
-    private fun importNow(list: List<com.fujiapp.remote.wifi.FujiWifi.Photo>) {
+    private fun importNow(list: List<com.fujiapp.remote.wifi.FujiWifi.Photo>, again: Boolean) {
         if (list.isEmpty()) {
             a.showNotice("Tap pictures to select them first.")
             return
         }
-        a.wifi.importPhotos(list)
+        a.wifi.importPhotos(list, again)
         selected.clear()
         shown = null
         render()

@@ -100,7 +100,7 @@ class LabScreen(private val a: MainActivity) {
         })
     }
 
-    private val filmSim = Kit.Chips(c, SIMS.map { it.second }, wrap = true) { i ->
+    private val filmSim = Kit.Chips(c, SIMS.map { it.second }) { i ->
         val sim = SIMS[i].first
         change(recipe.copy(filmSim = sim, monoWarmCool = if (sim.toning) recipe.monoWarmCool else 0, monoMagentaGreen = if (sim.toning) recipe.monoMagentaGreen else 0))
     }

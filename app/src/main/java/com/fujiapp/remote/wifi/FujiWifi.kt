@@ -246,20 +246,37 @@ class FujiWifi private constructor(
     }
 
     /** Copy a photo in 1 MB windows from 512-byte-aligned offsets, as fuji-bridge does. */
-    fun download(photo: Photo, sink: (ByteArray) -> Unit, progress: (Long) -> Unit) {
+    /**
+     * Copy a photo in 1 MB windows, as fuji-bridge does: a window can come back shorter than asked
+     * in the middle of a file, so keep asking until the whole size is in (only an empty window ends
+     * it early). A short window's tail past the last 512-byte boundary is asked for again, so every
+     * read starts aligned (an unaligned one is many times slower). Returns the bytes written.
+     */
+    fun download(photo: Photo, sink: (ByteArray) -> Unit, progress: (Long) -> Unit): Long {
         ensureInfo(photo.handle)
+        val total = photo.size
         var offset = 0L
-        val known = photo.size > 0
-        while (!known || offset < photo.size) {
-            val ask = if (known) minOf(WINDOW.toLong(), photo.size - offset).toInt() else WINDOW
+        while (total <= 0 || offset < total) {
+            val ask = if (total > 0) minOf(WINDOW.toLong(), total - offset).toInt() else WINDOW
             val r = transact(GET_PARTIAL_OBJECT, listOf(photo.handle, offset.toInt(), ask))
             if (!r.ok) throw PtpException(r.code, "Reading ${photo.name}")
-            if (r.data.isEmpty()) break
-            sink(r.data)
-            offset += r.data.size
+            val data = r.data
+            if (data.isEmpty()) break
+            if (data.size < ask) {
+                if (total <= 0) {
+                    sink(data)
+                    offset += data.size
+                    break // no size to go by: a short window is the end
+                }
+                log("wifi: ${photo.name}: ${data.size} of $ask bytes at $offset")
+            }
+            val keep = keepOf(offset, data.size, ask, total)
+            sink(if (keep == data.size) data else data.copyOf(keep))
+            offset += keep
             progress(offset)
-            if (r.data.size < ask) break // the camera's end of file
         }
+        if (total > 0 && offset != total) throw IOException("${photo.name} came in incomplete ($offset of $total bytes).")
+        return offset
     }
 
     // ---- remote ----
@@ -287,6 +304,26 @@ class FujiWifi private constructor(
     }
 
     private var eventSocket: Socket? = null
+
+    /**
+     * The next packet the camera pushes on its event socket (55741): code and parameters, or null
+     * once the socket is gone. Read all the time while remote mode runs: a camera whose events
+     * nobody reads may block on them.
+     */
+    fun nextEvent(): Pair<Int, List<Int>>? {
+        val inp = runCatching { eventSocket?.getInputStream() }.getOrNull() ?: return null
+        return try {
+            val head = readExactly(inp, 4)
+            val len = u32(head, 0)
+            if (len < 8 || len > 1 shl 20) return null
+            val body = readExactly(inp, len - 4)
+            val code = if (body.size >= 4) (body[2].toInt() and 0xFF) or ((body[3].toInt() and 0xFF) shl 8) else 0
+            val params = (0 until maxOf(0, (body.size - 8) / 4)).map { u32(body, 8 + it * 4) }
+            code to params
+        } catch (_: IOException) {
+            null
+        }
+    }
 
     /** Take a picture: the standard capture command. */
     fun capture(): Int = transact(INITIATE_CAPTURE, listOf(0, 0)).code
@@ -447,6 +484,7 @@ class FujiWifi private constructor(
         private const val SETTLE_MS = 60L
         private const val MAX_PACKET = 64 * 1024 * 1024
         private const val WINDOW = 1024 * 1024
+        private const val ALIGN = 512
         private const val INIT_FAIL = 5
         private const val VERSION = 0x8f53e4f2.toInt()
 
@@ -527,6 +565,19 @@ class FujiWifi private constructor(
             b.putInt(0x5d48a5ad).putInt(0x0b7fb287).putInt(0xd0ded5d3.toInt()).putInt(0)
             for (ch in name.take(26)) b.putShort(ch.code.toShort())
             return b.array()
+        }
+
+        /**
+         * How much of a window of [got] bytes read at [offset] to keep: all of it, unless it came back
+         * short of [ask] before the end ([total]); then only up to the last 512-byte boundary, so the
+         * next read starts aligned (never nothing, so the copy always moves on).
+         */
+        fun keepOf(offset: Long, got: Int, ask: Int, total: Long): Int {
+            if (got >= ask || total <= 0) return got
+            val end = offset + got
+            if (end >= total) return got
+            val aligned = end - end % ALIGN
+            return if (aligned > offset) (aligned - offset).toInt() else got
         }
 
         /** A PTP DevicePropDesc: code, type, get/set, default, current, then a range or an enumeration. */

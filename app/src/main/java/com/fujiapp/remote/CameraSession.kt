@@ -144,8 +144,13 @@ class CameraSession(context: Context) {
 
     fun setWifiActive(on: Boolean) {
         if (wifiActive.value != on) AppLog.add("wifi session ${if (on) "starting" else "ended"}")
+        if (wifiActive.value && !on) wifiEndedAt = System.currentTimeMillis()
         wifiActive.value = on
     }
+
+    /** When the last Wi-Fi session ended: the camera takes a while to leave Wi-Fi. */
+    @Volatile
+    private var wifiEndedAt = 0L
 
     /** One camera operation at a time (info read, setting write or file transfer). */
     private val opLock = Mutex()
@@ -621,6 +626,13 @@ class CameraSession(context: Context) {
                 if (wifiActive.value) throw CameraBusyException("The camera is on Wi-Fi for Photos or Remote. Close them first.")
                 // Plugged in by USB the camera answers Bluetooth transfers with "busy", then nothing.
                 if (usbPlugged()) throw CameraBusyException("The camera is connected by USB. Unplug the cable to use Bluetooth backups and recipe reads.")
+                // Right after Photos or Remote the camera is still closing its Wi-Fi and answers
+                // transfers with "busy", then nothing (seen in the logs): give it a moment first.
+                val sinceWifi = System.currentTimeMillis() - wifiEndedAt
+                if (sinceWifi < WIFI_SETTLE_MS) {
+                    AppLog.add("waiting for the camera to leave Wi-Fi")
+                    delay(WIFI_SETTLE_MS - sinceWifi)
+                }
                 try {
                     awaitReady()
                     Result.success(op(cam))
@@ -839,6 +851,8 @@ class CameraSession(context: Context) {
     }
 
     private companion object {
+        /** How long after a Wi-Fi session Bluetooth transfers wait. */
+        const val WIFI_SETTLE_MS = 12_000L
         const val KEY_ADDRESSES = "addresses"
         const val KEY_NAMES = "names"
         const val KEY_ID_PREFIX = "id:"

@@ -27,7 +27,7 @@ or redistributed.**
 | Tab | What's on it |
 |---|---|
 | **Camera** | Before connecting: find and pair a camera, or reconnect to a paired one. Connected: a drawing of the camera (or your own photo of it, set in Settings), the **Photos** and **Remote** tiles (Wi-Fi, see below), a readout strip (shots, power, Wi-Fi, firmware), the **remote release** (hold to focus, let go to shoot), and every value the camera reports, decoded and kept live. **State:** power switch, Wi-Fi access point, pictures waiting, why it's busy, card, firmware update. **Camera:** model, name, serial, firmware, model code. **Connection:** paired phones, connect while off, location sync and interval, transfer settings, activity log. **Lens**, and **Technical** details. |
-| **Recipes** | Three sections. **Camera**: the C1–C7 names, read over Bluetooth from the camera's settings file when you open it (about 2 seconds; offline, the newest backup stands in), and, over USB, every setting of every slot. **Library**: 30 recipes after popular film stocks (Portra, Ektar, Gold, Kodachrome, Superia, Pro 400H, Velvia, CineStill, Tri-X, HP5…) and films (Blade Runner 2049, Skyfall, The Matrix, Fury Road, Drive, Amélie, In the Mood for Love, Dune…), each with what the look is, how the settings get there, and how to shoot it. **Lab**: the preview stays on screen while the settings, in five tabs (Film, Color, Light, Tone, Detail), change it; film simulations, grain and the effects are one-tap chips; **Library** starts from any recipe; the sample is a color chart (the 24 color-checker patches, eight skin tones, a grey ramp) or one of your photos, and a **vectorscope** in the manner of DaVinci Resolve's shows where every color lands, with the **skin-tone line** to check skin against; save the result to My recipes. Any recipe can be loaded into a slot. |
+| **Recipes** | Three sections. **Camera**: the C1–C7 names, read over Bluetooth from the camera's settings file when you open it (about 2 seconds; offline, the newest backup stands in), and, over USB, every setting of every slot. **Library**: 30 recipes after popular film stocks (Portra, Ektar, Gold, Kodachrome, Superia, Pro 400H, Velvia, CineStill, Tri-X, HP5…) and films (Blade Runner 2049, Skyfall, The Matrix, Fury Road, Drive, Amélie, In the Mood for Love, Dune…), each with what the look is, how the settings get there, and how to shoot it. **Lab**: the preview stays on screen while the settings, in five tabs (Film, Color, Light, Tone, Detail), change it; film simulations, grain and the effects are one-tap chips (film simulations in a row you scroll, like grain); **Library** starts from any recipe; the sample is a color chart (the 24 color-checker patches, eight skin tones, a grey ramp) or one of your photos, and a **vectorscope** in the manner of DaVinci Resolve's shows where every color lands, with the **skin-tone line** to check skin against; save the result to My recipes. Any recipe can be loaded into a slot. |
 | **Equipment** | Total shots, shutter actuations against the rated shutter life, and all of the camera's usage counters: power-ons, operating, shooting and viewfinder time, viewfinder switches, flash, half-presses, OK and command-dial use, sensor cleanings, heat warnings and shutdowns, time spent with the sensor hot, battery, USB and lens counts. |
 | **Backups** | Back up the camera's settings file, restore it to the same model, share it, delete it, or **import** a backup file (one shared from this app, or the camera's own file). |
 | **Settings** | **Set the camera clock** (on by default, as XApp does). **Camera picture**: the app's drawing, or a photo of your camera. The camera's **Location sync** (see below), **location interval** and **Connect while power off** settings, written straight to the camera. **Log**: save, share, clear. |
@@ -100,14 +100,18 @@ while its Wi-Fi is on; the app reconnects Bluetooth directly when you close Phot
 
 - **Photos** lists the card, newest first, with the camera's own thumbnails. Select pictures and
   import them, or import the newest ten; they land in **Pictures/Fuji Remote** (RAW and video in
-  Downloads). A picture already imported isn't copied again.
+  Downloads). Every file is checked before it's kept (its full size; a JPEG's end marker), so a
+  broken transfer never lands in your gallery. **Newest 10** skips pictures already imported;
+  choosing a picture imports it again, replacing the earlier copy.
 - **Remote** fits on one screen: the live view (tap it to focus there), shutter speed, aperture
   and exposure compensation with their current values between − and +, ISO from the camera's own
   list, a **Focus** button (half press and hold; tap again to let go) and the shutter. The values
   follow the camera as its dials turn. A dial set to a value wins: the app shows it but can't
   change it, and in modes A, S and P the value the camera picks is dimmed. **Settings** changes the
   camera's film simulation, white balance, focus mode, image quality and self-timer, from the
-  values the camera offers. Tapping the live view focuses there, on the camera's own focus grid.
+  values the camera offers (or the values they're known to take, when the camera doesn't list them).
+  Tapping the live view focuses there, on the camera's own focus grid. Closing waits for a picture
+  just taken to finish and ends the session properly before Android drops the camera's network.
 
 While the camera is plugged in by USB it answers Bluetooth backups with "busy" and won't start its
 Wi-Fi, so the app says so and asks you to unplug it instead of retrying.

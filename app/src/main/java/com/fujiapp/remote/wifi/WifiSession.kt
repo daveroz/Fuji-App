@@ -85,6 +85,9 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     /** The remote's last word: a shot taken, a refusal. */
     val note: StateFlow<String?> = _note.asStateFlow()
     private var pollJob: Job? = null
+    private var eventJob: Job? = null
+    /** When the last picture was taken in remote mode. */
+    private var lastCapture = 0L
 
     val totalOnCard: Int get() = handles.size
     val canLoadMore: Boolean get() = listed < handles.size
@@ -140,8 +143,11 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         _progress.value = if (unreadable > 0) "The camera didn't describe $unreadable of ${page.size} pictures." else null
     }
 
-    /** Copy [selected] into the phone's Pictures (Downloads for RAW and video). */
-    fun importPhotos(selected: List<FujiWifi.Photo>) {
+    /**
+     * Copy [selected] into the phone's Pictures (Downloads for RAW and video). With [again], pictures
+     * imported before are imported once more (their earlier copy replaced); otherwise they're skipped.
+     */
+    fun importPhotos(selected: List<FujiWifi.Photo>, again: Boolean = false) {
         val w = wifi ?: return
         if (selected.isEmpty()) return
         if (importJob?.isActive == true) {
@@ -154,8 +160,8 @@ class WifiSession(context: Context, private val camera: CameraSession) {
             var done = 0
             try {
                 for (p in selected) {
-                    if (isImported(p)) { done++; continue }
-                    io.withLock {
+                    if (!again && isImported(p)) { done++; continue }
+                    val bytes = io.withLock {
                         withContext(Dispatchers.IO) {
                             save(p) { out ->
                                 w.download(p, { out.write(it) }) { got ->
@@ -165,7 +171,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
                         }
                     }
                     markImported(p)
-                    AppLog.add("wifi: imported ${p.name}")
+                    AppLog.add("wifi: imported ${p.name}, $bytes bytes, checked")
                     done++
                     _photos.value = _photos.value.map { if (it.photo.handle == p.handle) it.copy(imported = true) else it }
                 }
@@ -179,7 +185,33 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         }
     }
 
-    private fun save(p: FujiWifi.Photo, write: (OutputStream) -> Unit) {
+    /**
+     * Write [p] with [write] (which returns the bytes it wrote), check it's whole (its full size;
+     * a JPEG ends with FF D9), and only then keep it. An earlier copy of the same name is replaced.
+     */
+    private fun save(p: FujiWifi.Photo, write: (OutputStream) -> Long): Long {
+        var written = 0L
+        val tail = ByteArray(2)
+        val counting = { out: OutputStream ->
+            object : OutputStream() {
+                override fun write(b: Int) { out.write(b); written++; tail[0] = tail[1]; tail[1] = b.toByte() }
+                override fun write(b: ByteArray, off: Int, len: Int) {
+                    out.write(b, off, len)
+                    written += len
+                    if (len >= 2) { tail[0] = b[off + len - 2]; tail[1] = b[off + len - 1] } else if (len == 1) { tail[0] = tail[1]; tail[1] = b[off] }
+                }
+            }
+        }
+        val jpeg = p.name.substringAfterLast('.', "").lowercase(Locale.US) in setOf("jpg", "jpeg")
+        val check = {
+            if (p.size > 0 && written != p.size) throw IOException("${p.name} came in incomplete ($written of ${p.size} bytes).")
+            if (jpeg && !(tail[0] == 0xFF.toByte() && tail[1] == 0xD9.toByte())) throw IOException("${p.name} came in damaged (it doesn't end like a JPEG).")
+        }
+        saveFile(p) { out -> write(counting(out)); check() }
+        return written
+    }
+
+    private fun saveFile(p: FujiWifi.Photo, write: (OutputStream) -> Unit) {
         val ext = p.name.substringAfterLast('.', "").lowercase(Locale.US)
         val image = ext in setOf("jpg", "jpeg", "heif", "hif", "heic")
         val mime = when (ext) {
@@ -199,6 +231,14 @@ class WifiSession(context: Context, private val camera: CameraSession) {
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
             val resolver = app.contentResolver
+            // An earlier (perhaps damaged) copy made by this app goes first, so the name stays the same.
+            runCatching {
+                resolver.delete(
+                    collection,
+                    "${MediaStore.MediaColumns.DISPLAY_NAME}=? AND ${MediaStore.MediaColumns.RELATIVE_PATH}=?",
+                    arrayOf(p.name, "$dir/Fuji Remote/"),
+                )
+            }
             val uri = resolver.insert(collection, values) ?: throw IOException("Couldn't create ${p.name}")
             try {
                 resolver.openOutputStream(uri)?.use(write) ?: throw IOException("Couldn't write ${p.name}")
@@ -209,9 +249,14 @@ class WifiSession(context: Context, private val camera: CameraSession) {
             }
         } else {
             val dir = File(app.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Fuji Remote").apply { mkdirs() }
-            File(dir, p.name).outputStream().use(write)
+            val file = File(dir, p.name)
+            try {
+                file.outputStream().use(write)
+            } catch (t: Throwable) {
+                file.delete()
+                throw t
+            }
         }
-        AppLog.add("wifi: imported ${p.name} (${p.size} bytes)")
     }
 
     private fun key(p: FujiWifi.Photo) = "${p.name}:${p.size}"
@@ -241,6 +286,13 @@ class WifiSession(context: Context, private val camera: CameraSession) {
                 AppLog.add("wifi: live view ended: ${t.message}")
             }
         }
+        // Whatever the camera pushes on its event socket is read (and logged), so it never waits on it.
+        eventJob = scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                val (code, params) = w.nextEvent() ?: break
+                AppLog.add("remote: event 0x%04X %s".format(code, params.joinToString(",") { "0x%X".format(it) }))
+            }
+        }
         // The camera's dials win over the app: follow them as they turn (XApp polls the same list).
         pollJob = scope.launch {
             var n = 0
@@ -255,11 +307,11 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     fun shoot() = remote("shoot") { w ->
         val code = w.capture()
         AppLog.add("wifi: capture -> ${Ptp.responseName(code)}")
-        if (_focused.value) {
-            runCatching { w.releaseFocus() }
-            _focused.value = false
-        }
+        // The shot ends the half press on the camera's side; letting go of it again mid-shot can
+        // leave the camera stuck, so only the app's state changes here.
+        _focused.value = false
         if (code == Ptp.OK) {
+            lastCapture = System.currentTimeMillis()
             _note.value = "Picture taken."
         } else if (camera.isConnected) {
             withContext(Dispatchers.Main) { camera.shutterPress(); camera.shutterRelease(shoot = true) }
@@ -326,10 +378,17 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     /** The camera's current value of [property], as last reported. */
     fun currentValue(property: Int): Long? = values[property]
 
-    /** A setting's allowed values and width, from the camera. */
+    /**
+     * A setting's allowed values and width: from the camera, or (when it doesn't list them, as an
+     * X100VI doesn't for its film simulation) the values this setting is known to take.
+     */
     suspend fun describeSetting(property: Int): FujiWifi.PropDesc? {
         val w = wifi ?: return null
-        return io.withLock { withContext(Dispatchers.IO) { runCatching { w.propDesc(property) }.getOrNull() } }
+        val desc = io.withLock { withContext(Dispatchers.IO) { runCatching { w.propDesc(property) }.getOrNull() } }
+        AppLog.add("remote: %04X offers %s".format(property, desc?.values?.joinToString(",") { "%X".format(it) } ?: "nothing"))
+        if (desc != null && desc.values.isNotEmpty()) return desc
+        val known = KNOWN_VALUES[property] ?: return desc
+        return FujiWifi.PropDesc(values[property] ?: known.first(), null, null, known, KNOWN_WIDTHS[property] ?: 2)
     }
 
     /** Change one of the camera's settings (film simulation, white balance, focus mode…). */
@@ -484,17 +543,38 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         pollJob = null
         liveJob?.cancel()
         liveJob = null
+        val wasFocused = _focused.value
         _focused.value = false
         _note.value = null
         values.clear()
         loggedEvents = false
-        live?.close()
+        val view = live
         live = null
         val w = wifi
         wifi = null
-        if (w != null) scope.launch(Dispatchers.IO) { runCatching { w.close() } }
-        join.release()
+        val events = eventJob
+        eventJob = null
         _frame.value = null
+        // A camera left in the middle of a shot (or cut off before it heard goodbye) can hang until
+        // its battery comes out: let a fresh shot finish, end the session over the network, and
+        // only then let Android drop the camera's Wi-Fi.
+        val wait = (lastCapture + CAPTURE_SETTLE_MS - System.currentTimeMillis()).coerceIn(0, CAPTURE_SETTLE_MS)
+        lastCapture = 0L
+        val network = join
+        scope.launch(Dispatchers.IO) {
+            if (w != null) {
+                if (wait > 0) {
+                    AppLog.add("wifi: letting the last shot finish (${wait / 1000.0} s) before closing")
+                    delay(wait)
+                }
+                if (wasFocused) runCatching { w.releaseFocus() }
+                runCatching { w.close() }
+                AppLog.add("wifi: session closed")
+            }
+            events?.cancel()
+            view?.close()
+            withContext(Dispatchers.Main) { if (wifi == null) network.release() }
+        }
     }
 
     private fun trim(v: Double): String = if (v == v.roundToInt().toDouble()) "${v.roundToInt()}" else String.format(Locale.US, "%.1f", v)
@@ -518,9 +598,21 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         private const val ACCESS_TIMEOUT_MS = 120_000L
         private const val POLL_MS = 600L
         private const val JOIN_RETRY_WITHIN_MS = 20_000L
+        /** How long a picture takes to finish (write, review) before the session may end. */
+        private const val CAPTURE_SETTLE_MS = 6_000L
         const val USB_PLUGGED = "The camera is connected by USB, and won't start its Wi-Fi like that. Unplug the cable, then try again."
         /** Every this many polls, read the shown properties directly too. */
         private const val FULL_EVERY = 10
+        /** Values each setting is known to take, for when the camera doesn't list them. */
+        private val KNOWN_VALUES: Map<Int, List<Long>> = mapOf(
+            FujiWifi.FILM_SIMULATION to com.fujiapp.remote.recipe.FilmSim.entries.map { it.code.toLong() },
+            FujiWifi.WHITE_BALANCE to listOf(0x0002L, 0x0004L, 0x8006L, 0x8001L, 0x8002L, 0x8003L, 0x0006L, 0x0008L),
+            FujiWifi.IMAGE_QUALITY to listOf(2L, 3L, 1L, 4L, 5L),
+            FujiWifi.SELF_TIMER to listOf(0L, 2_000L, 10_000L),
+            FujiWifi.FOCUS_MODE to listOf(0x8001L, 0x8002L, 1L),
+        )
+        private val KNOWN_WIDTHS = mapOf(FujiWifi.SELF_TIMER to 4)
+
         private val SHOWN = listOf(
             FujiWifi.SHUTTER_SPEED, FujiWifi.EXPOSURE_TIME, FujiWifi.F_NUMBER, FujiWifi.ISO,
             FujiWifi.EXPOSURE_BIAS, FujiWifi.SHOOTING_MODE, FujiWifi.BATTERY_LEVELS, FujiWifi.BATTERY,

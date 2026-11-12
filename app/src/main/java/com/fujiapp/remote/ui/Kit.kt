@@ -200,7 +200,15 @@ object Kit {
             addView(strip)
         }
 
+        private var selected: Int? = null
+
         fun select(index: Int?) {
+            // A newly chosen chip out of sight in a scrolling row is brought into view.
+            if (index != selected && index != null && view is HorizontalScrollView) {
+                val chip = chips.getOrNull(index)
+                if (chip != null) view.post { view.smoothScrollTo(maxOf(0, chip.left - Deco.dpi(ctx, 24)), 0) }
+            }
+            selected = index
             val inset = Deco.dpi(ctx, Deco.Lit.INSET_DP.toInt())
             chips.forEachIndexed { i, chip ->
                 val on = i == index

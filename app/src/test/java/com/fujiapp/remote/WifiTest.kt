@@ -76,3 +76,32 @@ class RafFileTest {
         assertNull(com.fujiapp.remote.usb.RafFile.jpegRange(ByteArray(92)))
     }
 }
+
+class DownloadWindowTest {
+    private val mb = 1024 * 1024
+
+    @Test
+    fun fullWindowsAreKept() {
+        assertEquals(mb, FujiWifi.keepOf(0, mb, mb, 11_649_721))
+    }
+
+    @Test
+    fun aShortWindowMidFileKeepsWholeBlocksOnly() {
+        // 700,000 bytes came back at offset 0 of an 11.6 MB file: keep 699,904 (1367 × 512), ask again from there.
+        assertEquals(699_904, FujiWifi.keepOf(0, 700_000, mb, 11_649_721))
+        // From an aligned offset as well.
+        assertEquals(512 * 100, FujiWifi.keepOf(mb.toLong(), 512 * 100 + 37, mb, 11_649_721))
+    }
+
+    @Test
+    fun theLastWindowIsKeptWhole() {
+        val total = 11_649_721L
+        val offset = 11L * mb
+        assertEquals((total - offset).toInt(), FujiWifi.keepOf(offset, (total - offset).toInt(), (total - offset).toInt(), total))
+    }
+
+    @Test
+    fun aTinyWindowStillMovesOn() {
+        assertEquals(100, FujiWifi.keepOf(0, 100, mb, 11_649_721))
+    }
+}
