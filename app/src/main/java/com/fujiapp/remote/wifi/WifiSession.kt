@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -75,6 +76,13 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     val readings: StateFlow<Map<String, String>> = _readings.asStateFlow()
     var isoChoices: List<Long> = emptyList()
         private set
+    private val _focused = MutableStateFlow(false)
+    /** True while the remote holds a half press (focus locked). */
+    val focused: StateFlow<Boolean> = _focused.asStateFlow()
+    private val _note = MutableStateFlow<String?>(null)
+    /** The remote's last word: a shot taken, a refusal. */
+    val note: StateFlow<String?> = _note.asStateFlow()
+    private var pollJob: Job? = null
 
     val totalOnCard: Int get() = handles.size
     val canLoadMore: Boolean get() = listed < handles.size
@@ -98,9 +106,14 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     private suspend fun listMore(w: FujiWifi) {
         val page = handles.reversed().drop(listed).take(PAGE)
         listed += page.size
+        var unreadable = 0
         for ((i, h) in page.withIndex()) {
             _progress.value = "Reading the card… ${i + 1} of ${page.size}"
-            val p = io.withLock { withContext(Dispatchers.IO) { w.describe(h) } } ?: continue
+            val p = io.withLock { withContext(Dispatchers.IO) { w.describe(h) } }
+            if (p == null) {
+                unreadable++
+                continue
+            }
             _photos.value = _photos.value + CardPhoto(p, null, isImported(p))
         }
         for (cp in _photos.value.filter { it.thumb == null }) {
@@ -108,7 +121,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
             val bmp = withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) } ?: continue
             _photos.value = _photos.value.map { if (it.photo.handle == cp.photo.handle) it.copy(thumb = bmp) else it }
         }
-        _progress.value = null
+        _progress.value = if (unreadable > 0) "The camera didn't describe $unreadable of ${page.size} pictures." else null
     }
 
     /** Copy [selected] into the phone's Pictures (Downloads for RAW and video). */
@@ -189,8 +202,11 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         val view = io.withLock { withContext(Dispatchers.IO) { w.startRemote() } }
         live = view
         isoChoices = io.withLock { withContext(Dispatchers.IO) { runCatching { w.allowedValues(FujiWifi.ISO) }.getOrDefault(emptyList()) } }
+        values.clear()
+        _focused.value = false
+        _note.value = null
         _phase.value = WifiPhase.Remote
-        refreshReadings()
+        refreshReadings(full = true)
         liveJob = scope.launch(Dispatchers.IO) {
             try {
                 while (isActive) {
@@ -203,19 +219,61 @@ class WifiSession(context: Context, private val camera: CameraSession) {
                 AppLog.add("wifi: live view ended: ${t.message}")
             }
         }
+        // The camera's dials win over the app: follow them as they turn (XApp polls the same list).
+        pollJob = scope.launch {
+            var n = 0
+            while (isActive && _phase.value == WifiPhase.Remote) {
+                delay(POLL_MS)
+                runCatching { refreshReadings(full = ++n % FULL_EVERY == 0) }.onFailure { AppLog.add("remote: poll failed: ${it.message}") }
+            }
+        }
     }
 
     /** Take a picture over Wi-Fi; if the camera won't, use the Bluetooth release. */
     fun shoot() = remote("shoot") { w ->
         val code = w.capture()
         AppLog.add("wifi: capture -> ${Ptp.responseName(code)}")
-        if (code != Ptp.OK) withContext(Dispatchers.Main) { camera.shutterPress(); camera.shutterRelease(shoot = true) }
+        if (_focused.value) {
+            runCatching { w.releaseFocus() }
+            _focused.value = false
+        }
+        if (code == Ptp.OK) {
+            _note.value = "Picture taken."
+        } else if (camera.isConnected) {
+            withContext(Dispatchers.Main) { camera.shutterPress(); camera.shutterRelease(shoot = true) }
+            _note.value = "Taken with the Bluetooth release."
+        } else {
+            _note.value = "The camera didn't take the picture (${Ptp.responseName(code)})."
+        }
     }
 
-    fun stepShutter(up: Boolean) = remote("shutter ${if (up) "+" else "-"}") { it.step(FujiWifi.STEP_SHUTTER_SPEED, up) }
-    fun stepAperture(up: Boolean) = remote("aperture ${if (up) "+" else "-"}") { it.step(FujiWifi.STEP_APERTURE, up) }
-    fun stepExposure(up: Boolean) = remote("exposure ${if (up) "+" else "-"}") { it.step(FujiWifi.STEP_EXPOSURE_BIAS, up) }
-    fun setIso(value: Long) = remote("iso $value") { it.set32(FujiWifi.ISO, value.toInt()) }
+    /** Half press: focus (at a point of the live view, 0–1 across and down) and hold it. */
+    fun focus(at: Pair<Float, Float>? = null) = remote(if (at == null) "focus" else "focus at %.2f,%.2f".format(Locale.US, at.first, at.second)) { w ->
+        if (_focused.value) runCatching { w.releaseFocus() }
+        val code = w.focus(at)
+        AppLog.add("wifi: focus -> ${Ptp.responseName(code)}")
+        _focused.value = code == Ptp.OK
+        _note.value = if (code == Ptp.OK) "Focus locked. Tap the shutter to shoot, or Focus again to let go." else "The camera didn't focus (${Ptp.responseName(code)})."
+    }
+
+    fun releaseFocus() = remote("release focus") { w ->
+        val code = w.releaseFocus()
+        AppLog.add("wifi: release focus -> ${Ptp.responseName(code)}")
+        _focused.value = false
+        _note.value = null
+    }
+
+    fun stepShutter(up: Boolean) = remote("shutter ${if (up) "+" else "-"}") { step(it, FujiWifi.STEP_SHUTTER_SPEED, up, "shutter speed") }
+    fun stepAperture(up: Boolean) = remote("aperture ${if (up) "+" else "-"}") { step(it, FujiWifi.STEP_APERTURE, up, "aperture") }
+    fun stepExposure(up: Boolean) = remote("exposure ${if (up) "+" else "-"}") { step(it, FujiWifi.STEP_EXPOSURE_BIAS, up, "exposure") }
+    fun setIso(value: Long) = remote("iso $value") {
+        if (!it.set32(FujiWifi.ISO, value.toInt())) _note.value = "The camera kept its ISO: its ISO dial is probably set to a value."
+    }
+
+    private fun step(w: FujiWifi, op: Int, up: Boolean, what: String) {
+        val code = w.step(op, up)
+        _note.value = if (code == Ptp.OK) null else "The camera didn't change the $what: its dial is set to a value."
+    }
 
     private fun remote(what: String, action: suspend (FujiWifi) -> Unit) {
         val w = wifi ?: return
@@ -224,7 +282,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         scope.launch {
             try {
                 io.withLock { withContext(Dispatchers.IO) { action(w) } }
-                refreshReadings()
+                refreshReadings(full = false)
             } catch (c: CancellationException) {
                 throw c
             } catch (t: Throwable) {
@@ -233,30 +291,66 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         }
     }
 
-    private suspend fun refreshReadings() {
+    /** What the camera reported, by property code: its event list fills in what changed. */
+    private val values = HashMap<Int, Long>()
+    private var loggedEvents = false
+
+    /** Read the camera's event list (and with [full], each shown property) and update the readings. */
+    private suspend fun refreshReadings(full: Boolean) {
         val w = wifi ?: return
-        val values = io.withLock {
+        val changed = io.withLock {
             withContext(Dispatchers.IO) {
                 val events = runCatching { w.events() }.getOrDefault(emptyMap())
-                fun read(p: Int): Long? = events[p] ?: w.get(p)?.let { d ->
-                    when {
-                        d.size >= 4 -> FujiWifi.u32(d, 0).toLong() and 0xFFFFFFFFL
-                        d.size >= 2 -> (FujiProtocol.u16(d) ?: 0).toLong()
-                        else -> null
-                    }
+                if (!loggedEvents && events.isNotEmpty()) {
+                    loggedEvents = true
+                    AppLog.add("remote: camera reports ${events.entries.joinToString { "%04X=%X".format(it.key, it.value) }}")
                 }
-                mapOf(
-                    "Shutter" to read(FujiWifi.EXPOSURE_TIME)?.let(::shutterText),
-                    "Aperture" to read(FujiWifi.F_NUMBER)?.takeIf { it > 0 }?.let { "f/" + trim(it / 100.0) },
-                    "ISO" to read(FujiWifi.ISO)?.let(::isoText),
-                    "Exposure" to read(FujiWifi.EXPOSURE_BIAS)?.let { ev -> val v = ev.toInt().toShort() / 1000.0; (if (v > 0) "+" else "") + trim(v) },
-                    "Battery" to read(FujiWifi.BATTERY)?.let { "$it" },
-                ).filterValues { it != null }.mapValues { it.value!! }
+                val fresh = HashMap(events)
+                if (full || values.isEmpty()) {
+                    for (p in SHOWN) if (p !in fresh) w.get(p)?.let { d -> number(d)?.let { fresh[p] = it } }
+                }
+                val diff = fresh.filter { (k, v) -> values[k] != v }
+                values.putAll(fresh)
+                diff to readings()
             }
         }
-        AppLog.add("remote: readings $values")
-        _readings.value = values
+        val (diff, now) = changed
+        if (diff.isEmpty() && _readings.value.isNotEmpty()) return
+        if (diff.isNotEmpty() && _readings.value.isNotEmpty()) {
+            AppLog.add("remote: camera changed ${diff.entries.joinToString { "%04X=%X".format(it.key, it.value) }}")
+        }
+        _readings.value = now
     }
+
+    private fun number(d: ByteArray): Long? = when {
+        d.size >= 4 -> FujiWifi.u32(d, 0).toLong() and 0xFFFFFFFFL
+        d.size >= 2 -> (FujiProtocol.u16(d) ?: 0).toLong()
+        else -> null
+    }
+
+    private fun readings(): Map<String, String> {
+        val v = values
+        return mapOf(
+            "Shutter" to (v[FujiWifi.SHUTTER_SPEED]?.let(FujiWifi::shutterText) ?: v[FujiWifi.EXPOSURE_TIME]?.let(::shutterText)),
+            "Aperture" to v[FujiWifi.F_NUMBER]?.let { if (it in 1..0xFFFE) "f/" + trim(it / 100.0) else null },
+            "ISO" to v[FujiWifi.ISO]?.let(::isoText),
+            "Exposure" to v[FujiWifi.EXPOSURE_BIAS]?.let { ev -> val e = ev.toInt().toShort() / 1000.0; (if (e > 0) "+" else "") + trim(e) },
+            "Mode" to v[FujiWifi.SHOOTING_MODE]?.let(::modeText),
+            "Battery" to (v[FujiWifi.BATTERY_LEVELS]?.let(::batteryText) ?: v[FujiWifi.BATTERY]?.let { if (it in 1..3) "${it * 100 / 3}%" else null }),
+        ).filterValues { it != null }.mapValues { it.value!! }
+    }
+
+    /** Standard PTP exposure program. */
+    private fun modeText(v: Long): String? = when (v) {
+        1L -> "M"
+        2L -> "P"
+        3L -> "A"
+        4L -> "S"
+        else -> null
+    }
+
+    /** Fujifilm's five-bar battery: 6–11 (6 and 7 both the lowest bar), as fuji-bridge reads it. */
+    private fun batteryText(v: Long): String? = if (v in 6..11) "${(maxOf(7L, v) - 6) * 20}%" else null
 
     // ---- connection ----
 
@@ -273,10 +367,21 @@ class WifiSession(context: Context, private val camera: CameraSession) {
                     function,
                     onQueued = { _phase.value = WifiPhase.Working("Waiting for the camera to finish over Bluetooth…") },
                     onStarted = { _phase.value = WifiPhase.Working("Asking the camera to start its Wi-Fi…") },
+                    onBusy = { _phase.value = WifiPhase.Working("The camera is still closing its last Wi-Fi connection…") },
                 )
                 AppLog.add("wifi: camera network ${net.ssid}")
                 _phase.value = WifiPhase.Working("Joining ${net.ssid}… Allow the connection when Android asks.")
-                val network = join.join(net.ssid, net.password)
+                val joinStarted = System.currentTimeMillis()
+                val network = try {
+                    join.join(net.ssid, net.password)
+                } catch (e: IOException) {
+                    // A quick "unavailable" usually means Android scanned before the camera's network was up.
+                    if (System.currentTimeMillis() - joinStarted > JOIN_RETRY_WITHIN_MS) throw e
+                    AppLog.add("wifi: join failed (${e.message}); trying once more")
+                    _phase.value = WifiPhase.Working("Joining ${net.ssid} again…")
+                    delay(2_000)
+                    join.join(net.ssid, net.password)
+                }
                 AppLog.add("wifi: joined ${net.ssid}")
                 _phase.value = WifiPhase.Working("Connecting to the camera…")
                 val w = withContext(Dispatchers.IO) {
@@ -316,8 +421,14 @@ class WifiSession(context: Context, private val camera: CameraSession) {
     }
 
     private fun cleanup() {
+        pollJob?.cancel()
+        pollJob = null
         liveJob?.cancel()
         liveJob = null
+        _focused.value = false
+        _note.value = null
+        values.clear()
+        loggedEvents = false
         live?.close()
         live = null
         val w = wifi
@@ -346,5 +457,13 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         /** The name the camera shows for this phone, as over Bluetooth. */
         private const val CLIENT_NAME = "Fuji Remote"
         private const val ACCESS_TIMEOUT_MS = 120_000L
+        private const val POLL_MS = 600L
+        private const val JOIN_RETRY_WITHIN_MS = 20_000L
+        /** Every this many polls, read the shown properties directly too. */
+        private const val FULL_EVERY = 10
+        private val SHOWN = listOf(
+            FujiWifi.SHUTTER_SPEED, FujiWifi.EXPOSURE_TIME, FujiWifi.F_NUMBER, FujiWifi.ISO,
+            FujiWifi.EXPOSURE_BIAS, FujiWifi.SHOOTING_MODE, FujiWifi.BATTERY_LEVELS, FujiWifi.BATTERY,
+        )
     }
 }

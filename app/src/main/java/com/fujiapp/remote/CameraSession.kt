@@ -610,6 +610,8 @@ class CameraSession(context: Context) {
         transferJob = scope.launch {
             val result = try {
                 val cam = camera ?: throw GattException("Not connected.")
+                // On Wi-Fi the camera doesn't answer transfers over Bluetooth (it says busy, then nothing).
+                if (wifiActive.value) throw CameraBusyException("The camera is on Wi-Fi for Photos or Remote. Close them first.")
                 try {
                     awaitReady()
                     Result.success(op(cam))
@@ -694,7 +696,12 @@ class CameraSession(context: Context) {
     }
 
     /** Ask the connected camera to start its Wi-Fi for [function]; its network name and password. */
-    suspend fun wakeWifi(function: Int, onQueued: () -> Unit = {}, onStarted: () -> Unit = {}): FujiCamera.CameraWifi {
+    suspend fun wakeWifi(
+        function: Int,
+        onQueued: () -> Unit = {},
+        onStarted: () -> Unit = {},
+        onBusy: () -> Unit = {},
+    ): FujiCamera.CameraWifi {
         if (camera == null) throw IOException("Connect to the camera over Bluetooth first.")
         AppLog.add("wifi: wake (function $function)")
         if (opLock.isLocked) {
@@ -705,7 +712,7 @@ class CameraSession(context: Context) {
         return opLock.withLock {
             val cam = camera ?: throw IOException("The Bluetooth connection dropped. Try again once it's back.")
             onStarted()
-            cam.wakeWifi(function)
+            cam.wakeWifi(function, onBusy)
         }
     }
 

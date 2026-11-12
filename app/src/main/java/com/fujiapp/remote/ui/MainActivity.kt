@@ -173,7 +173,7 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     merge(
                         session.state, session.vitals, session.backup, session.restore, session.recipes, transfer.state,
-                        wifi.phase, wifi.photos, wifi.progress, wifi.readings,
+                        wifi.phase, wifi.photos, wifi.progress, wifi.readings, wifi.focused, wifi.note,
                     ).collect { render() }
                 }
                 launch {

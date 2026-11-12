@@ -356,7 +356,7 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
      * its network name and password. The camera answers on AP_STATE a few seconds later: 1 = up,
      * 0 = busy (XApp waits 200 ms and asks again). The SSID is hidden while Bluetooth started it.
      */
-    suspend fun wakeWifi(function: Int): CameraWifi {
+    suspend fun wakeWifi(function: Int, onBusy: () -> Unit = {}): CameraWifi {
         if (!gatt.has(FujiGatt.FUNCTION_LAUNCH)) throw UnsupportedCameraException("This camera can't start its Wi-Fi from Bluetooth.")
         val ssid = FujiProtocol.string(gatt.read(FujiGatt.CAMERA_NAME))?.trim().orEmpty()
         if (ssid.isEmpty()) throw GattException("The camera didn't give its Wi-Fi name.")
@@ -381,8 +381,12 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
             val state = FujiProtocol.u16(answer)?.and(0x7FFF) ?: answer.firstOrNull()?.toInt()
             log("Wi-Fi: AP state $state")
             if (state != 0) break
-            if (++busy >= 3) throw CameraBusyException("The camera is busy. Leave its menus or playback and try again.")
-            delay(200)
+            // Busy: right after a Wi-Fi session ends the camera takes 5–15 s to close it (seen on an
+            // X100VI), and it may be in a menu. XApp asks again after 200 ms; keep asking for a while.
+            busy++
+            if (busy == 2) onBusy()
+            if (busy >= WIFI_BUSY_TRIES) throw CameraBusyException("The camera is still busy. Leave its menus or playback, wait a few seconds and try again.")
+            delay(if (busy < 3) 200 else 1_000)
             gatt.write(FujiGatt.FUNCTION_LAUNCH, FujiProtocol.le16(function))
         }
         return CameraWifi(ssid, password)
@@ -394,6 +398,7 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
         const val WIFI_VIEW_IMAGES = 3
         const val WIFI_REMOTE = 4
         private const val WIFI_ANSWER_MS = 12_000L
+        private const val WIFI_BUSY_TRIES = 18
         const val SHUTTER_HALF = 1
         const val SHUTTER_FULL = 2
 

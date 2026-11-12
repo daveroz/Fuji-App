@@ -30,6 +30,7 @@ class FujiWifi private constructor(
     private var output: OutputStream? = null
     private var transaction = 1
     private var openCaptureTid = 0
+    private var sessionOpen = false
 
     class Reply(val code: Int, val data: ByteArray) {
         val ok: Boolean get() = code == Ptp.OK
@@ -78,6 +79,7 @@ class FujiWifi private constructor(
         Thread.sleep(SETTLE_MS) // OpenSession inside this window gets silence
         val r = transact(Ptp.OPEN_SESSION, listOf(1))
         if (!r.ok && r.code != Ptp.SESSION_ALREADY_OPEN) throw PtpException(r.code, "Open session")
+        sessionOpen = true
         log("wifi: session open")
     }
 
@@ -163,15 +165,46 @@ class FujiWifi private constructor(
         runCatching { transact(GET_DATES, listOf(0, 30000)) }
         get(IMPORT_COUNT)
         val d = get(IMPORT_HANDLES) ?: throw IOException("The camera didn't list its pictures.")
-        log("wifi: picture list ${d.size} bytes")
-        if (d.size < 4) return emptyList()
-        val n = u32(d, 0)
-        if (n <= 0 || d.size < 4 + n * 4) return emptyList()
-        return (0 until n).map { u32(d, 4 + it * 4) }
+        val count = runCatching { events()[OBJECT_COUNT] }.getOrNull()
+        var list = handles(d)
+        log("wifi: picture list ${d.size} bytes, ${list.size} handles, object count $count")
+        if (list.isEmpty() && count != null && count in 1..20_000) list = (1..count.toInt()).toList()
+        // XApp turns on "send the originals" (D226 = 2) when an import starts; fuji-bridge reads the
+        // object properties only after that.
+        set16(COMPRESS_SMALL, ORIGINALS)
+        // The X100VI lists newest first; handles count up in shooting order.
+        return list.distinct().sorted()
     }
 
-    /** Name, size and date of a photo, from three object properties (fast on an X100VI). */
+    /**
+     * Name, size and date of a photo: three object properties (fast), or the camera's ObjectInfo
+     * when it doesn't answer those (fuji-bridge does the same; ObjectInfo is honest about the size
+     * once D227 is 1, as libfuji sets it).
+     */
     fun describe(handle: Int): Photo? {
+        if (propertiesWork) {
+            byProperties(handle)?.let { return it }
+            propertiesWork = false
+            log("wifi: no name and size by object property; using ObjectInfo")
+        }
+        if (!honestSizes) {
+            honestSizes = true
+            set16(CORRECT_SIZE, 1)
+        }
+        val r = transact(Ptp.GET_OBJECT_INFO, listOf(handle))
+        if (!r.ok) return null
+        if (!loggedInfo) {
+            loggedInfo = true
+            log("wifi: ObjectInfo #$handle ${r.data.size} bytes: ${r.data.take(64).joinToString(" ") { "%02x".format(it) }}")
+        }
+        return objectInfo(handle, r.data) ?: run { log("wifi: ObjectInfo #$handle unreadable"); null }
+    }
+
+    private var propertiesWork = true
+    private var honestSizes = false
+    private var loggedInfo = false
+
+    private fun byProperties(handle: Int): Photo? {
         val sizeData = transact(GET_OBJECT_PROP_VALUE, listOf(handle, OBJECT_SIZE)).takeIf { it.ok }?.data ?: return null
         val size = when {
             sizeData.size >= 8 -> (u32(sizeData, 0).toLong() and 0xFFFFFFFFL) or (u32(sizeData, 4).toLong() shl 32)
@@ -190,8 +223,9 @@ class FujiWifi private constructor(
     /** Copy a photo in 1 MB windows from 512-byte-aligned offsets, as fuji-bridge does. */
     fun download(photo: Photo, sink: (ByteArray) -> Unit, progress: (Long) -> Unit) {
         var offset = 0L
-        while (offset < photo.size) {
-            val ask = minOf(WINDOW.toLong(), photo.size - offset).toInt()
+        val known = photo.size > 0
+        while (!known || offset < photo.size) {
+            val ask = if (known) minOf(WINDOW.toLong(), photo.size - offset).toInt() else WINDOW
             val r = transact(GET_PARTIAL_OBJECT, listOf(photo.handle, offset.toInt(), ask))
             if (!r.ok) throw PtpException(r.code, "Reading ${photo.name}")
             if (r.data.isEmpty()) break
@@ -231,28 +265,44 @@ class FujiWifi private constructor(
     /** Take a picture: the standard capture command. */
     fun capture(): Int = transact(INITIATE_CAPTURE, listOf(0, 0)).code
 
+    /**
+     * Half press (focus and lock), as XApp's touch AF: LockS1Lock with a focus point packed as
+     * aspect width, aspect height, column, row (one byte each; columns and rows count from 1 on the
+     * camera's grid). Without a point, the camera's current one (property 0xD17C) is used.
+     */
+    fun focus(at: Pair<Float, Float>? = null): Int {
+        val current = get(S1_LOCK_POINT)?.takeIf { it.size >= 4 }?.let { u32(it, 0) }
+        var point = current ?: 0
+        if (at != null && current != null) {
+            val grid = focusGrid ?: propDesc(S1_LOCK_POINT)?.max?.toInt()?.also { focusGrid = it }
+            val cols = grid?.let { (it shr 8) and 0xFF } ?: 0
+            val rows = grid?.let { it and 0xFF } ?: 0
+            if (cols > 0 && rows > 0) {
+                val col = (at.first * cols).toInt().coerceIn(0, cols - 1) + 1
+                val row = (at.second * rows).toInt().coerceIn(0, rows - 1) + 1
+                point = (current and 0xFFFF0000.toInt()) or (col shl 8) or row
+            }
+        }
+        log("wifi: focus at 0x%08X".format(point))
+        return transact(LOCK_S1, listOf(point)).code
+    }
+
+    private var focusGrid: Int? = null
+
+    /** Let go of the half press. */
+    fun releaseFocus(): Int = transact(UNLOCK_S1).code
+
+    /** A property's description: current value and its range or allowed values. */
+    fun propDesc(property: Int): PropDesc? {
+        val r = transact(GET_DEVICE_PROP_DESC, listOf(property))
+        return if (r.ok) parseDesc(r.data) else null
+    }
+
     /** Shutter speed, aperture or exposure compensation one step up or down. */
     fun step(op: Int, up: Boolean): Int = transact(op, listOf(if (up) 1 else 0)).code
 
     /** A property's allowed values, from GetDevicePropDesc (enumeration form), or empty. */
-    fun allowedValues(property: Int): List<Long> {
-        val r = transact(GET_DEVICE_PROP_DESC, listOf(property))
-        if (!r.ok || r.data.size < 6) return emptyList()
-        val d = r.data
-        val type = (d[2].toInt() and 0xFF) or ((d[3].toInt() and 0xFF) shl 8)
-        val width = when (type) { 1, 2 -> 1; 3, 4 -> 2; 5, 6 -> 4; 7, 8 -> 8; else -> return emptyList() }
-        var at = 5 + 2 * width // code, type, get/set, default, current
-        if (at >= d.size) return emptyList()
-        if (d[at].toInt() != 2) return emptyList() // not an enumeration
-        at += 1
-        if (at + 2 > d.size) return emptyList()
-        val n = (d[at].toInt() and 0xFF) or ((d[at + 1].toInt() and 0xFF) shl 8)
-        at += 2
-        return (0 until n).mapNotNull { i ->
-            val o = at + i * width
-            if (o + width > d.size) null else (0 until width).fold(0L) { acc, k -> acc or ((d[o + k].toLong() and 0xFF) shl (8 * k)) }
-        }
-    }
+    fun allowedValues(property: Int): List<Long> = propDesc(property)?.values.orEmpty()
 
     /** The video stream: each frame is an 18-byte header (u32 total length first) and a JPEG. */
     class LiveView(private val socket: Socket) : Closeable {
@@ -313,8 +363,12 @@ class FujiWifi private constructor(
     }
 
     override fun close() {
+        runCatching { socket?.soTimeout = CLOSE_TIMEOUT_MS }
         runCatching { if (openCaptureTid != 0) transact(TERMINATE_OPEN_CAPTURE, listOf(openCaptureTid)) }
         openCaptureTid = 0
+        // Say goodbye: a camera left with an open session takes longer to free its Wi-Fi.
+        if (sessionOpen) runCatching { transact(Ptp.CLOSE_SESSION) }
+        sessionOpen = false
         runCatching { eventSocket?.close() }
         eventSocket = null
         runCatching { socket?.close() }
@@ -324,6 +378,9 @@ class FujiWifi private constructor(
     /** A photo on the camera's card. */
     data class Photo(val handle: Int, val name: String, val size: Long, val date: String?)
 
+    /** What GetDevicePropDesc says: the current value and a range (min, max) or a list. */
+    data class PropDesc(val current: Long, val min: Long?, val max: Long?, val values: List<Long>)
+
     companion object {
         const val HOST = "192.168.0.1"
         const val PORT = 55740
@@ -331,6 +388,7 @@ class FujiWifi private constructor(
         const val VIDEO_PORT = 55742
         private const val CONNECT_TIMEOUT_MS = 8_000
         private const val READ_TIMEOUT_MS = 30_000
+        private const val CLOSE_TIMEOUT_MS = 2_000
         private const val FIRST_INIT_TIMEOUT_MS = 40_000
         private const val RETRY_INIT_TIMEOUT_MS = 12_000
         private const val SETTLE_MS = 60L
@@ -354,6 +412,8 @@ class FujiWifi private constructor(
         const val STEP_SHUTTER_SPEED = 0x902C
         const val STEP_APERTURE = 0x902D
         const val STEP_EXPOSURE_BIAS = 0x902E
+        const val LOCK_S1 = 0x9026
+        const val UNLOCK_S1 = 0x9027
 
         // properties
         const val EVENTS = 0xD212
@@ -377,6 +437,14 @@ class FujiWifi private constructor(
         const val F_NUMBER = 0x5007
         const val EXPOSURE_TIME = 0x500D
         const val ISO = 0xD02A
+        /** Fujifilm's shutter speed, the one XApp's remote shows (PROPERTY_SHUTTER_SPEED_EX). */
+        const val SHUTTER_SPEED = 0xD240
+        const val BATTERY_LEVELS = 0xD242
+        const val SHOOTING_MODE = 0x500E
+        const val AF_STATUS = 0xD209
+        const val S1_LOCK_POINT = 0xD17C
+        const val OBJECT_COUNT = 0xD222
+        const val ORIGINALS = 2
         const val EXPOSURE_BIAS = 0x5010
         const val FILM_SIMULATION = 0xD001
 
@@ -402,6 +470,70 @@ class FujiWifi private constructor(
             b.putInt(0x5d48a5ad).putInt(0x0b7fb287).putInt(0xd0ded5d3.toInt()).putInt(0)
             for (ch in name.take(26)) b.putShort(ch.code.toShort())
             return b.array()
+        }
+
+        /** A PTP DevicePropDesc: code, type, get/set, default, current, then a range or an enumeration. */
+        fun parseDesc(d: ByteArray): PropDesc? {
+            if (d.size < 6) return null
+            val type = (d[2].toInt() and 0xFF) or ((d[3].toInt() and 0xFF) shl 8)
+            val width = when (type) { 1, 2 -> 1; 3, 4 -> 2; 5, 6 -> 4; 7, 8 -> 8; else -> return null }
+            fun num(at: Int): Long? = if (at + width > d.size) null else (0 until width).fold(0L) { acc, k -> acc or ((d[at + k].toLong() and 0xFF) shl (8 * k)) }
+            val current = num(5 + width) ?: return null
+            var at = 5 + 2 * width
+            if (at >= d.size) return PropDesc(current, null, null, emptyList())
+            val form = d[at].toInt()
+            at += 1
+            return when (form) {
+                1 -> PropDesc(current, num(at), num(at + width), emptyList())
+                2 -> {
+                    if (at + 2 > d.size) return PropDesc(current, null, null, emptyList())
+                    val n = (d[at].toInt() and 0xFF) or ((d[at + 1].toInt() and 0xFF) shl 8)
+                    PropDesc(current, null, null, (0 until n).mapNotNull { num(at + 2 + it * width) })
+                }
+                else -> PropDesc(current, null, null, emptyList())
+            }
+        }
+
+        /** Fujifilm's device-prop array: u32 count, then that many u32 handles. */
+        fun handles(d: ByteArray): List<Int> {
+            if (d.size < 4) return emptyList()
+            val n = u32(d, 0)
+            if (n <= 0 || n > 20_000 || d.size < 4 + n * 4) return emptyList()
+            return (0 until n).map { u32(d, 4 + it * 4) }
+        }
+
+        /**
+         * Fujifilm's ObjectInfo over Wi-Fi (packed, as libfuji's `PtpFujiObjectInfo`): format u16 at 4
+         * (0x3001 a folder), the size an unaligned u32 at 13, the file name a PTP string at 52 and the
+         * capture date the string after it.
+         */
+        fun objectInfo(handle: Int, d: ByteArray): Photo? {
+            if (d.size <= NAME_AT) return null
+            if ((d[4].toInt() and 0xFF) or ((d[5].toInt() and 0xFF) shl 8) == 0x3001) return null
+            val name = Ptp.readString(d, NAME_AT).substringAfterLast('/').substringAfterLast('\\').trim()
+            if (name.isEmpty()) return null
+            val size = u32(d, 13).toLong() and 0xFFFFFFFFL
+            val dateAt = NAME_AT + 1 + (d[NAME_AT].toInt() and 0xFF) * 2
+            val date = Ptp.readString(d, dateAt).takeIf { it.length >= 15 && it[0].isDigit() }
+            return Photo(handle, name, size, date)
+        }
+
+        private const val NAME_AT = 52
+
+        /**
+         * Fujifilm's shutter speed (0xD240), as XApp shows it: -1 none; top bits 10 = a fraction,
+         * 1/(value / 1000); otherwise seconds × 1000.
+         */
+        fun shutterText(raw: Long): String? {
+            val v = raw.toInt()
+            if (v == -1 || raw == 0L) return null
+            return if (v and 0xC0000000.toInt() == Int.MIN_VALUE) {
+                val tenths = (v and Int.MAX_VALUE) / 100
+                if (tenths % 10 == 0) "1/${tenths / 10}" else "1/${tenths / 10}.${tenths % 10}"
+            } else {
+                val tenths = v / 100
+                if (tenths % 10 == 0) "${tenths / 10}s" else "${tenths / 10}.${tenths % 10}s"
+            }
         }
 
         fun u32(b: ByteArray, at: Int): Int =

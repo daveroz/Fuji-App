@@ -96,9 +96,11 @@ while its Wi-Fi is on; the app reconnects Bluetooth when you close Photos or Rem
 - **Photos** lists the card, newest first, with the camera's own thumbnails. Select pictures and
   import them, or import the newest ten; they land in **Pictures/Fuji Remote** (RAW and video in
   Downloads). A picture already imported isn't copied again.
-- **Remote** shows the live view and takes pictures, with shutter speed, aperture and exposure
-  compensation one step at a time and ISO from the camera's own list. On the X100VI the shutter
-  speed and aperture follow the dials and the aperture ring: set them to **A** to change them here.
+- **Remote** fits on one screen: the live view (tap it to focus there), shutter speed, aperture
+  and exposure compensation with their current values between − and +, ISO from the camera's own
+  list, a **Focus** button (half press and hold; tap again to let go) and the shutter. The values
+  follow the camera as its dials turn. A dial set to a value wins: the app shows it but can't
+  change it.
 
 What Bluetooth alone can do: the shutter release (half press to focus, full press to shoot), the
 clock, location, and the settings this app already writes. Fujifilm's Bluetooth service has no
@@ -211,11 +213,17 @@ every write is a write with response. Every UUID, with its source, is in
   camera name (`bf6dc9cf`), the password `e809256a` (never logged). Over TCP `192.168.0.1:55740` the
   same PTP containers as over USB follow an 82-byte init; after OpenSession the camera waits for OK
   (`0xDF00` in the event list `0xD212`). Import: client state `0xDF01 = 20`, the handle list
-  `0xD621`, name/size/date through `GetObjectPropValue` (`0xDC07`/`0xDC04`/`0xDC08`), thumbnails
-  `GetThumb`, files through `GetPartialObject` in 1 MB windows. Remote: `0xDF00 = 6`, `0xDF01 = 22`,
-  `InitiateOpenCapture`, the live view on port 55742 (18-byte header + JPEG per frame), the step
-  operations `0x902C`/`0x902D`/`0x902E`. After fuji-bridge (import, tested on an X100VI) and libfuji
-  (remote); both MIT.
+  `0xD621` (newest first on an X100VI, so sorted), `0xD226 = 2` (originals) as the import starts,
+  then name/size/date through `GetObjectPropValue` (`0xDC07`/`0xDC04`/`0xDC08`); an X100VI answers
+  those with "parameter not supported", so the app falls back to `GetObjectInfo` with `0xD227 = 1`
+  (Fujifilm's packed layout: size an unaligned u32 at 13, name at 52). Thumbnails `GetThumb`, files
+  `GetPartialObject` in 1 MB windows. Remote: `0xDF00 = 6`, `0xDF01 = 22`, `InitiateOpenCapture`, the
+  live view on port 55742 (18-byte header + JPEG per frame), the step operations
+  `0x902C`/`0x902D`/`0x902E`, the event list polled every 0.6 s. Shutter speed is `0xD240` (top bits
+  `10`: 1/(value/1000) s; otherwise value/1000 s), as XApp's remote shows it; focus is `LockS1Lock`
+  `0x9026` with the point packed as aspect width, aspect height, column, row from `0xD17C` and its
+  range, `UnlockS1Lock` `0x9027` to let go. After fuji-bridge (import, tested on an X100VI) and
+  libfuji (remote); both MIT. Property codes and value formats read from XApp.
 - **Recovery**: connecting retries up to 3 times, a dropped link reconnects on its own, and backups
   and shutter-count reads retry once on a fresh connection. A restore never retries on its own.
 

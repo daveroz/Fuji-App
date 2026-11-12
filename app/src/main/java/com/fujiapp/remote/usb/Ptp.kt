@@ -28,6 +28,8 @@ object Ptp {
     const val GENERAL_ERROR = 0x2002
     const val SESSION_NOT_OPEN = 0x2003
     const val OPERATION_NOT_SUPPORTED = 0x2005
+    const val PARAMETER_NOT_SUPPORTED = 0x2006
+    const val INVALID_OBJECT = 0x2009
     const val DEVICE_BUSY = 0x2019
     const val PROP_NOT_SUPPORTED = 0x200A
     const val INVALID_VALUE = 0x201C
@@ -109,6 +111,8 @@ object Ptp {
         GENERAL_ERROR -> "general error"
         SESSION_NOT_OPEN -> "session not open"
         OPERATION_NOT_SUPPORTED -> "operation not supported"
+        PARAMETER_NOT_SUPPORTED -> "parameter not supported"
+        INVALID_OBJECT -> "no such picture"
         PROP_NOT_SUPPORTED -> "property not supported"
         DEVICE_BUSY -> "device busy"
         INVALID_VALUE -> "value refused"

@@ -3,10 +3,12 @@ package com.fujiapp.remote.ui
 import android.graphics.Bitmap
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import androidx.core.view.isVisible
 import com.fujiapp.remote.wifi.CardPhoto
 import com.fujiapp.remote.wifi.WifiPhase
 
@@ -109,56 +111,101 @@ class PhotosScreen(private val a: MainActivity) {
     }
 }
 
-/** Remote shooting over Wi-Fi: live view, exposure and the shutter. */
+/** Remote shooting over Wi-Fi: live view, exposure, focus and the shutter, on one screen. */
 class RemoteScreen(private val a: MainActivity) {
     private val c = a
-    private val status = Kit.text(c, null, 14f, Deco.MUTED)
+    private val status = Kit.text(c, null, 13f, Deco.MUTED)
     private val progress = Kit.progress(c)
-    private val live = ImageView(c).apply {
+    private val live = TapImageView(c).apply {
         scaleType = ImageView.ScaleType.FIT_CENTER
         setBackgroundColor(0xFF000000.toInt())
-        contentDescription = "Live view"
+        contentDescription = "Live view. Tap to focus there."
     }
-    private val strip = FrameLayout(c)
+    private val marker = View(c).apply {
+        background = GradientDrawable().apply {
+            setColor(0)
+            setStroke(Deco.dpi(c, 2), Deco.AMBER_LIGHT)
+            cornerRadius = Deco.dp(c, 3f)
+        }
+        visibility = View.GONE
+    }
+    private val frame = FrameLayout(c).apply {
+        addView(live, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
+        addView(marker, FrameLayout.LayoutParams(Deco.dpi(c, MARKER_DP), Deco.dpi(c, MARKER_DP)))
+    }
+    private val mode = Kit.label(c, "", Deco.DIM, 10f)
+    private val shutterValue = value()
+    private val apertureValue = value()
+    private val exposureValue = value()
     private val iso = Kit.PickerRow(c, "ISO") {
         val choices = a.wifi.isoChoices
         if (choices.isEmpty()) a.showNotice("The camera didn't list its ISO values.") else
             a.choose("ISO", choices.map { v -> val n = v and 0x00FFFFFF; if (v and 0x80000000L != 0L) "Auto $n" else "$n" }, -1) { i -> a.wifi.setIso(choices[i]) }
     }
+    private val focusButton = Kit.button(c, "Focus", Kit.Style.SECONDARY) {
+        if (a.wifi.focused.value) a.wifi.releaseFocus() else {
+            placeMarker(null)
+            a.wifi.focus()
+        }
+    }
     private var shownReadings: Map<String, String>? = null
+    private var markerAt: Pair<Float, Float>? = null
 
     val view: View = Kit.page(c, Kit.column(c).apply {
         addView(Kit.row(c).apply {
             addView(Kit.column(c).apply {
                 addView(Kit.label(c, "Over Wi-Fi", Deco.DIM))
-                addView(Kit.text(c, "Remote", 30f), Kit.lp(top = Deco.dpi(c, 10)))
+                addView(Kit.text(c, "Remote", 26f), Kit.lp(top = Deco.dpi(c, 6)))
             }, Kit.lp(0, weight = 1f))
             addView(Kit.button(c, "Close", Kit.Style.QUIET) { a.closeCameraPage() })
-        }, Kit.lp(top = Deco.dpi(c, 4)))
-        addView(status, Kit.lp(top = Deco.dpi(c, 12)))
-        addView(progress, Kit.lp(top = Deco.dpi(c, 8)))
-        addView(live, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 240)).apply { topMargin = Deco.dpi(c, 12) })
-        addView(strip, Kit.lp(top = Deco.dpi(c, 12)))
-        addView(Kit.panel(c).apply {
-            addView(stepper("Shutter speed", { a.wifi.stepShutter(false) }, { a.wifi.stepShutter(true) }))
+        })
+        addView(status, Kit.lp(top = Deco.dpi(c, 6)))
+        addView(progress, Kit.lp(top = Deco.dpi(c, 6)))
+        addView(frame, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 216)).apply { topMargin = Deco.dpi(c, 8) })
+        addView(mode, Kit.lp(top = Deco.dpi(c, 6)))
+        addView(Kit.panel(c, padV = 0).apply {
+            addView(stepper("Shutter speed", shutterValue, { a.wifi.stepShutter(false) }, { a.wifi.stepShutter(true) }))
             addView(Kit.hairline(c))
-            addView(stepper("Aperture", { a.wifi.stepAperture(false) }, { a.wifi.stepAperture(true) }))
+            addView(stepper("Aperture", apertureValue, { a.wifi.stepAperture(false) }, { a.wifi.stepAperture(true) }))
             addView(Kit.hairline(c))
-            addView(stepper("Exposure", { a.wifi.stepExposure(false) }, { a.wifi.stepExposure(true) }))
+            addView(stepper("Exposure", exposureValue, { a.wifi.stepExposure(false) }, { a.wifi.stepExposure(true) }))
             addView(Kit.hairline(c))
             addView(iso.view)
-        }, Kit.lp(top = Deco.dpi(c, 12)))
-        addView(Kit.text(c, "Shutter speed and aperture follow the camera's dials: set them to A on the camera to change them from here.", 13f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 10)))
-        addView(shutter(), LinearLayout.LayoutParams(Deco.dpi(c, 88), Deco.dpi(c, 88)).apply {
-            gravity = Gravity.CENTER_HORIZONTAL; topMargin = Deco.dpi(c, 18)
-        })
+        }, Kit.lp(top = Deco.dpi(c, 6)))
+        addView(Kit.text(c, "Turning a dial on the camera shows up here. A dial set to a value wins over the app.", 12f, Deco.DIM), Kit.lp(top = Deco.dpi(c, 6)))
+        addView(Kit.row(c).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(focusButton, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 16) })
+            addView(shutter(), LinearLayout.LayoutParams(Deco.dpi(c, 76), Deco.dpi(c, 76)))
+        }, Kit.lp(top = Deco.dpi(c, 10)))
     })
 
-    private fun stepper(title: String, down: () -> Unit, up: () -> Unit): View = Kit.row(c).apply {
-        setPadding(0, Deco.dpi(c, 8), 0, Deco.dpi(c, 8))
+    init {
+        live.setOnClickListener {
+            imagePoint(live.tapX, live.tapY)?.let { p ->
+                placeMarker(p)
+                a.wifi.focus(p)
+            }
+        }
+    }
+
+    private fun value() = Kit.text(c, "—", 16f, Deco.TEXT, bold = true).apply {
+        gravity = Gravity.CENTER
+        maxLines = 1
+    }
+
+    private fun stepper(title: String, value: View, down: () -> Unit, up: () -> Unit): View = Kit.row(c).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, Deco.dpi(c, 5), 0, Deco.dpi(c, 5))
         addView(Kit.text(c, title, 14f, Deco.TEXT_SOFT), Kit.lp(0, weight = 1f))
-        addView(Kit.button(c, "−", Kit.Style.SECONDARY) { down() }, LinearLayout.LayoutParams(Deco.dpi(c, 56), Deco.dpi(c, 44)).apply { marginEnd = Deco.dpi(c, 8) })
-        addView(Kit.button(c, "+", Kit.Style.SECONDARY) { up() }, LinearLayout.LayoutParams(Deco.dpi(c, 56), Deco.dpi(c, 44)))
+        addView(stepButton("−", down), LinearLayout.LayoutParams(Deco.dpi(c, 46), Deco.dpi(c, 40)))
+        addView(value, LinearLayout.LayoutParams(Deco.dpi(c, 88), Kit.WRAP))
+        addView(stepButton("+", up), LinearLayout.LayoutParams(Deco.dpi(c, 46), Deco.dpi(c, 40)))
+    }
+
+    private fun stepButton(t: String, onClick: () -> Unit) = Kit.button(c, t, Kit.Style.SECONDARY, onClick).apply {
+        minHeight = 0
+        setPadding(0, 0, 0, 0)
     }
 
     private fun shutter(): View = View(c).apply {
@@ -175,6 +222,41 @@ class RemoteScreen(private val a: MainActivity) {
         }
     }
 
+    /** Where a tap lands on the picture itself (0–1 across and down), or null outside it. */
+    private fun imagePoint(x: Float, y: Float): Pair<Float, Float>? {
+        val d = live.drawable ?: return null
+        val vw = live.width.toFloat()
+        val vh = live.height.toFloat()
+        val iw = d.intrinsicWidth.toFloat()
+        val ih = d.intrinsicHeight.toFloat()
+        if (vw <= 0 || vh <= 0 || iw <= 0 || ih <= 0) return null
+        val scale = minOf(vw / iw, vh / ih)
+        val left = (vw - iw * scale) / 2
+        val top = (vh - ih * scale) / 2
+        val fx = (x - left) / (iw * scale)
+        val fy = (y - top) / (ih * scale)
+        return if (fx in 0f..1f && fy in 0f..1f) fx to fy else null
+    }
+
+    private fun placeMarker(at: Pair<Float, Float>?) {
+        markerAt = at
+        val size = Deco.dpi(c, MARKER_DP)
+        val d = live.drawable
+        var x = (live.width - size) / 2f
+        var y = (live.height - size) / 2f
+        if (at != null && d != null && d.intrinsicWidth > 0 && d.intrinsicHeight > 0) {
+            val scale = minOf(live.width.toFloat() / d.intrinsicWidth, live.height.toFloat() / d.intrinsicHeight)
+            val left = (live.width - d.intrinsicWidth * scale) / 2
+            val top = (live.height - d.intrinsicHeight * scale) / 2
+            x = left + at.first * d.intrinsicWidth * scale - size / 2f
+            y = top + at.second * d.intrinsicHeight * scale - size / 2f
+        }
+        marker.translationX = x
+        marker.translationY = y
+        marker.alpha = 0.6f
+        marker.visibility = View.VISIBLE
+    }
+
     fun showFrame(frame: Bitmap?) {
         if (frame != null) live.setImageBitmap(frame)
     }
@@ -186,16 +268,48 @@ class RemoteScreen(private val a: MainActivity) {
         status.text = when (phase) {
             is WifiPhase.Working -> phase.message
             is WifiPhase.Failed -> "Couldn't connect: ${phase.message}"
-            WifiPhase.Remote -> "Connected. Tap the button to take a picture."
+            WifiPhase.Remote -> w.note.value ?: "Connected. Tap the picture to focus there, or the round button to shoot."
             else -> "Not connected."
         }
         status.setTextColor(if (phase is WifiPhase.Failed) Deco.RED else Deco.MUTED)
+        val ready = phase == WifiPhase.Remote
+        Kit.setEnabled(focusButton, ready)
+        val focused = w.focused.value
+        focusButton.text = if (focused) "Let go of focus" else "Focus"
+        if (focused) marker.alpha = 1f else if (!ready) marker.isVisible = false
         val r = w.readings.value
         if (r != shownReadings) {
             shownReadings = r
-            strip.removeAllViews()
-            strip.addView(Kit.readoutStrip(c, listOf("Shutter", "Aperture", "ISO", "Exposure").map { it to (r[it] ?: "—") }))
+            shutterValue.text = r["Shutter"] ?: "—"
+            apertureValue.text = r["Aperture"] ?: "—"
+            exposureValue.text = r["Exposure"] ?: "—"
             iso.set(r["ISO"] ?: "—")
+            mode.text = listOfNotNull(r["Mode"]?.let { "Mode $it" }, r["Battery"]?.let { "Battery $it" }).joinToString("  ·  ")
         }
     }
+
+    private companion object {
+        const val MARKER_DP = 44
+    }
+}
+
+/** The live view: remembers where it was tapped, so a click can focus there. */
+private class TapImageView(c: android.content.Context) : androidx.appcompat.widget.AppCompatImageView(c) {
+    var tapX = 0f
+        private set
+    var tapY = 0f
+        private set
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                tapX = event.x
+                tapY = event.y
+            }
+            MotionEvent.ACTION_UP -> performClick()
+        }
+        return true
+    }
+
+    override fun performClick(): Boolean = super.performClick()
 }
