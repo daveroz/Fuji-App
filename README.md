@@ -29,7 +29,7 @@ or redistributed.**
 | **Camera** | Before connecting: find and pair a camera, or reconnect to a paired one. Connected, laid out like Hasselblad's app: the camera (a drawing, or your own photo of it, set in Settings) in a dark panel with its name set wide and a row of spec icons (shots, power, Wi-Fi, firmware), then the **Photos** and **Remote** tiles (Wi-Fi, see below), a readout strip (shots, power, Wi-Fi, firmware), the **remote release** (hold to focus, let go to shoot), and every value the camera reports, decoded and kept live. **State:** power switch, Wi-Fi access point, pictures waiting, why it's busy, card, firmware update. **Camera:** model, name, serial, firmware, model code. **Connection:** paired phones, connect while off, location sync and interval, transfer settings, activity log. **Lens**, and **Technical** details. |
 | **Recipes** | Three sections. **Camera**: the C1–C7 names, read over Bluetooth from the camera's settings file when you open it (about 2 seconds; offline, the newest backup stands in), and, over USB, every setting of every slot. **Library**: 30 recipes after popular film stocks (Portra, Ektar, Gold, Kodachrome, Superia, Pro 400H, Velvia, CineStill, Tri-X, HP5…) and films (Blade Runner 2049, Skyfall, The Matrix, Fury Road, Drive, Amélie, In the Mood for Love, Dune…), each with what the look is, how the settings get there, and how to shoot it. **Lab**: the preview stays on screen while the settings, in five tabs (Film, Color, Light, Tone, Detail), change it; film simulations are a scrolling strip of thumbnails of your picture, each in its look (like a phone camera's filter row), and grain and the effects are one-tap chips; **Library** starts from any recipe; the sample is a color chart (the 24 color-checker patches, eight skin tones, a grey ramp) or one of your photos, and a **vectorscope** in the manner of DaVinci Resolve's shows where every color lands, with the **skin-tone line** to check skin against; save the result to My recipes. Any recipe can be loaded into a slot. |
 | **Equipment** | Total shots, shutter actuations against the rated shutter life, and all of the camera's usage counters: power-ons, operating, shooting and viewfinder time, viewfinder switches, flash, half-presses, OK and command-dial use, sensor cleanings, heat warnings and shutdowns, time spent with the sensor hot, battery, USB and lens counts. |
-| **Backups** | Back up the camera's settings file, restore it to the same model, share it, delete it, or **import** a backup file (one shared from this app, or the camera's own file). |
+| **Backups** | Back up the camera's settings file, restore it to the same model, share it, delete it, or **import** a backup file (one shared from this app, or the camera's own file). Each backup is a ticket-style card: camera, firmware and date as labelled fields, the recipes inside below a tear line. |
 | **Settings** | **Set the camera clock** (on by default, as XApp does). **Camera picture**: the app's drawing, or a photo of your camera. The camera's **Location sync** (see below), **location interval** and **Connect while power off** settings, written straight to the camera. **Log**: save, share, clear. |
 
 The **LOG** button at the top of every screen saves the app's recording as a `.txt` file in
@@ -138,6 +138,13 @@ The app always listens for the requests, as XApp does: an X100VI only finishes i
 connection once a phone has subscribed to them (see *How it works*). Requests left unanswered
 during a transfer made the camera drop the link in field logs, so without location access the app
 says so once and suggests turning Location sync off.
+
+### Layout
+
+Cards with rounded corners hold everything, each detail's label above its value, two to a line
+(after the flight-booking and Hasselblad references); backups and library recipes are ticket-style
+cards with a tear line; buttons are pills; the tab bar has line icons. The palette, the haze, the
+ceiling lights, the grain and the type stay the app's own.
 
 ### Look
 

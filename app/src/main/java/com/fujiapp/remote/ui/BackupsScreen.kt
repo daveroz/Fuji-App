@@ -1,7 +1,9 @@
 package com.fujiapp.remote.ui
 
 import android.text.format.Formatter
+import android.view.Gravity
 import android.view.View
+import android.widget.LinearLayout
 import com.fujiapp.remote.BackupState
 import com.fujiapp.remote.ConnState
 import com.fujiapp.remote.RestoreState
@@ -11,6 +13,10 @@ import java.util.Date
 
 /** Back up the camera's settings (with the C1–C7 recipes), restore them, and manage backups. */
 class BackupsScreen(private val a: MainActivity) {
+    private companion object {
+        const val CARD_PAD = 18
+    }
+
     private val c = a
     private val backupButton = Kit.button(c, "Back up camera settings") { a.askBackupName() }
     private val progress = Kit.progress(c)
@@ -34,10 +40,9 @@ class BackupsScreen(private val a: MainActivity) {
             Kit.lp(top = Deco.dpi(c, 14)),
         )
         addView(backupButton, Kit.lp(top = Deco.dpi(c, 24)))
-        addView(Kit.button(c, "Import a backup file", Kit.Style.SECONDARY) { a.pickBackupToImport() }, Kit.lp(top = Deco.dpi(c, 10)))
         addView(progress, Kit.lp(top = Deco.dpi(c, 12)))
         addView(status, Kit.lp(top = Deco.dpi(c, 10)))
-        addView(Kit.sectionTitle(c, "Saved on this phone"))
+        addView(Layouts.header(c, "Saved on this phone", "IMPORT A FILE") { a.pickBackupToImport() })
         addView(empty)
         addView(list)
     })
@@ -90,30 +95,32 @@ class BackupsScreen(private val a: MainActivity) {
 
     private fun drawList() {
         list.removeAllViews()
-        val dates = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+        val days = DateFormat.getDateInstance(DateFormat.MEDIUM)
+        val times = DateFormat.getTimeInstance(DateFormat.SHORT)
+        // Each backup as a ticket, like the references' boarding passes: what and when on top,
+        // the details as labelled fields, a tear line, the recipes inside, then what to do with it.
         for (meta in items) {
-            list.addView(Kit.panel(c, padV = 16).apply {
-                addView(Kit.text(c, meta.name, 17f, Deco.TEXT, bold = true))
-                addView(
-                    Kit.label(
-                        c,
-                        listOf(
-                            meta.cameraModel,
-                            meta.firmware.takeIf { it.isNotBlank() }?.let { "FW $it" },
-                            Formatter.formatShortFileSize(c, meta.size.toLong()),
-                        ).filter { !it.isNullOrBlank() }.joinToString(" · "),
-                        Deco.DIM, 10f,
-                    ),
-                    Kit.lp(top = Deco.dpi(c, 8)),
-                )
-                addView(Kit.text(c, dates.format(Date(meta.savedAt)), 13f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 6)))
+            list.addView(Kit.panel(c, padH = CARD_PAD, padV = 18).apply {
+                addView(Kit.row(c).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(Kit.text(c, meta.name, 17f, Deco.TEXT, bold = true), Kit.lp(0, weight = 1f))
+                    addView(Kit.label(c, times.format(Date(meta.savedAt)), Deco.AMBER_LIGHT, 10f), Kit.lp(Kit.WRAP).apply { marginStart = Deco.dpi(c, 8) })
+                })
+                addView(Kit.row(c).apply {
+                    addView(Layouts.field(c, "CAMERA", meta.cameraModel.ifBlank { "—" }), Kit.lp(0, weight = 1f))
+                    addView(Layouts.field(c, "FIRMWARE", meta.firmware.ifBlank { "—" }), Kit.lp(0, weight = 1f))
+                    addView(Layouts.field(c, "DATE", days.format(Date(meta.savedAt)), end = true), Kit.lp(0, weight = 1.3f))
+                }, Kit.lp(top = Deco.dpi(c, 16)))
+                addView(TicketDivider(c), LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 18)).apply {
+                    topMargin = Deco.dpi(c, 16)
+                    marginStart = -Deco.dpi(c, CARD_PAD)
+                    marginEnd = -Deco.dpi(c, CARD_PAD)
+                })
                 val recipes = a.session.store.settings(meta)?.customSlots.orEmpty().filter { it.name.isNotBlank() }
-                if (recipes.isNotEmpty()) {
-                    addView(
-                        Kit.text(c, recipes.joinToString("  ·  ") { "${it.label} ${it.name}" }, 13f, Deco.TEXT_SOFT),
-                        Kit.lp(top = Deco.dpi(c, 10)),
-                    )
-                }
+                addView(Kit.row(c).apply {
+                    addView(Layouts.field(c, "RECIPES", recipes.joinToString("  ·  ") { "${it.label} ${it.name}" }.ifBlank { "—" }), Kit.lp(0, weight = 1f))
+                    addView(Layouts.field(c, "SIZE", Formatter.formatShortFileSize(c, meta.size.toLong()), end = true), Kit.lp(Kit.WRAP).apply { marginStart = Deco.dpi(c, 12) })
+                }, Kit.lp(top = Deco.dpi(c, 14)))
                 addView(Kit.row(c).apply {
                     val restore = Kit.button(c, "Restore", Kit.Style.SECONDARY) { a.confirmRestore(meta) }
                     Kit.setEnabled(restore, restoreAllowed)

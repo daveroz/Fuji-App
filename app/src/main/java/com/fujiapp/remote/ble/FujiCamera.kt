@@ -387,7 +387,13 @@ class FujiCamera(private val gatt: GattClient, private val log: (String) -> Unit
             if (busy == 2) onBusy()
             if (busy >= WIFI_BUSY_TRIES) throw CameraBusyException("The camera is still busy. Leave its menus or playback, wait a few seconds and try again.")
             delay(if (busy < 3) 200 else 1_000)
-            gatt.write(FujiGatt.FUNCTION_LAUNCH, FujiProtocol.le16(function))
+            if (gatt.disconnected.value) throw CameraBusyException("The camera is still finishing its last Wi-Fi session. Try again in a few seconds.")
+            try {
+                gatt.write(FujiGatt.FUNCTION_LAUNCH, FujiProtocol.le16(function))
+            } catch (e: GattException) {
+                // The camera dropped Bluetooth while still busy with Wi-Fi.
+                throw CameraBusyException("The camera is still finishing its last Wi-Fi session. Try again in a few seconds.")
+            }
         }
         return CameraWifi(ssid, password)
     }

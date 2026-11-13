@@ -30,8 +30,8 @@ class ConnectScreen(private val a: MainActivity) {
     private val found = Kit.column(c)
 
     val view: View = Kit.page(c, Kit.column(c).apply {
-        addView(art, Kit.lp(top = Deco.dpi(c, 4)))
-        addView(Kit.label(c, "Bluetooth", Deco.DIM), Kit.lp(top = Deco.dpi(c, 12)))
+        addView(Layouts.hero(c).apply { addView(art, Kit.lp()) }, Kit.lp(top = Deco.dpi(c, 4)))
+        addView(Kit.label(c, "Bluetooth", Deco.DIM), Kit.lp(top = Deco.dpi(c, 18)))
         addView(Kit.text(c, "Connect your camera", 30f), Kit.lp(top = Deco.dpi(c, 12)))
         addView(
             Kit.text(
@@ -192,7 +192,7 @@ class StatusScreen(private val a: MainActivity) {
 
     /** A panel to go somewhere, like Hasselblad's "Discover": the title set wide, a line, an arrow. */
     private fun tile(title: String, detail: String, onClick: () -> Unit): View = Kit.column(c).apply {
-        background = Deco.pressable(Deco.box(c, Deco.PANEL, Deco.BORDER_SOFT, 6f), Deco.box(c, Deco.SURFACE_HI, Deco.BORDER_STRONG, 6f))
+        background = Deco.pressable(Deco.glass(c, Layouts.CARD_RADIUS), Deco.box(c, Deco.SURFACE_HI, Deco.BORDER_STRONG, Layouts.CARD_RADIUS))
         setPadding(Deco.dpi(c, 16), Deco.dpi(c, 14), Deco.dpi(c, 16), Deco.dpi(c, 14))
         addView(Kit.row(c).apply {
             gravity = Gravity.CENTER_VERTICAL

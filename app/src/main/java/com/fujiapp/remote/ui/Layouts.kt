@@ -18,9 +18,13 @@ import android.widget.TextView
  * palette, type and haze stay the app's own.
  */
 object Layouts {
-    /** A dark, square-cornered panel that frames a camera, a picture or a readout. */
+    /** Card corners, as in the references' rounded cards. */
+    const val CARD_RADIUS = 22f
+
+    /** A glass card that frames a camera, a picture or a readout. */
     fun hero(c: Context): LinearLayout = Kit.column(c).apply {
-        background = Deco.box(c, Deco.PANEL, Deco.BORDER_SOFT, 6f)
+        // Glass, like every other panel: the haze, lights and grain show through.
+        background = Deco.glass(c, CARD_RADIUS)
         val pad = Deco.dpi(c, 16)
         setPadding(pad, pad, pad, pad)
     }
@@ -91,6 +95,68 @@ object Layouts {
         }
     }
 
+    /** A label above its value, as the references lay out their details (FROM / Jakarta). */
+    fun field(c: Context, label: String, value: String, end: Boolean = false): View = Kit.column(c).apply {
+        if (end) gravity = Gravity.END
+        addView(Kit.label(c, label, Deco.DIM, 9f).apply { if (end) gravity = Gravity.END })
+        addView(Kit.text(c, value, 15f, Deco.TEXT).apply {
+            if (end) gravity = Gravity.END
+            setTextIsSelectable(true)
+        }, Kit.lp(top = Deco.dpi(c, 5)))
+    }
+
+    /**
+     * Readings as the references lay out details: each label above its value, two to a line (a
+     * long one takes the line), thin rules between lines.
+     */
+    fun fieldGrid(c: Context, rows: List<Pair<String, String>>): View = Kit.column(c).apply {
+        val lines = mutableListOf<List<Pair<String, String>>>()
+        var pending: Pair<String, String>? = null
+        for (r in rows) {
+            val wide = r.second.length > WIDE_VALUE || r.first.length > WIDE_LABEL
+            when {
+                wide -> {
+                    pending?.let { lines += listOf(it) }
+                    pending = null
+                    lines += listOf(r)
+                }
+                pending == null -> pending = r
+                else -> {
+                    lines += listOf(pending, r)
+                    pending = null
+                }
+            }
+        }
+        pending?.let { lines += listOf(it) }
+        lines.forEachIndexed { i, line ->
+            if (i > 0) addView(Kit.hairline(c))
+            addView(Kit.row(c).apply {
+                setPadding(0, Deco.dpi(c, 12), 0, Deco.dpi(c, 12))
+                gravity = Gravity.TOP
+                line.forEachIndexed { k, (label, value) ->
+                    addView(field(c, label.uppercase(), value, end = k == 1), Kit.lp(0, weight = 1f))
+                }
+            })
+        }
+    }
+
+    private const val WIDE_VALUE = 18
+    private const val WIDE_LABEL = 20
+
+    /** A section's title with an action on the right ("Saved trips · See more"). */
+    fun header(c: Context, title: String, action: String? = null, onAction: (() -> Unit)? = null): View = Kit.row(c).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, Deco.dpi(c, 26), 0, Deco.dpi(c, 10))
+        addView(Kit.sectionTitle(c, title).apply { setPadding(0, 0, 0, 0) }, Kit.lp(0, weight = 1f))
+        if (action != null && onAction != null) {
+            addView(Kit.label(c, action, Deco.MUTED, 10f).apply {
+                isClickable = true
+                setPadding(Deco.dpi(c, 8), Deco.dpi(c, 6), 0, Deco.dpi(c, 6))
+                setOnClickListener { onAction() }
+            })
+        }
+    }
+
     /** Tiles in a row of equal widths. */
     fun tileRow(c: Context, tiles: List<Tile>): View = Kit.row(c).apply {
         tiles.forEachIndexed { i, t ->
@@ -101,8 +167,15 @@ object Layouts {
 
 /** A thin line icon in the app's amber, drawn in code (no artwork). */
 @SuppressLint("ViewConstructor") // made in code only
-class LineIcon(c: Context, private val kind: Kind, private val color: Int = Deco.AMBER_LIGHT) : View(c) {
-    enum class Kind { SHOTS, POWER, WIFI, CHIP, FILM, WB, FLASH, TIMER, FOCUS, ISO, BATTERY, MACRO }
+class LineIcon(c: Context, private val kind: Kind, color: Int = Deco.AMBER_LIGHT) : View(c) {
+    enum class Kind { SHOTS, POWER, WIFI, CHIP, FILM, WB, FLASH, TIMER, FOCUS, ISO, BATTERY, MACRO, GAUGE, ARCHIVE, GEAR }
+
+    /** The line colour (the tab bar dims the icons it isn't on). */
+    var tint: Int = color
+        set(value) {
+            field = value
+            invalidate()
+        }
 
     private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -118,7 +191,7 @@ class LineIcon(c: Context, private val kind: Kind, private val color: Int = Deco
         val s = minOf(w, h)
         val cx = w / 2
         val cy = h / 2
-        p.color = color
+        p.color = tint
         p.strokeWidth = maxOf(1.5f, s * 0.07f)
         p.style = Paint.Style.STROKE
         when (kind) {
@@ -219,6 +292,30 @@ class LineIcon(c: Context, private val kind: Kind, private val color: Int = Deco
                 canvas.drawRoundRect(r, s * 0.05f, s * 0.05f, p)
                 canvas.drawLine(cx + s * 0.4f, cy - s * 0.08f, cx + s * 0.4f, cy + s * 0.08f, p)
             }
+            Kind.GAUGE -> {
+                r.set(cx - s * 0.4f, cy - s * 0.32f, cx + s * 0.4f, cy + s * 0.48f)
+                canvas.drawArc(r, 160f, 220f, false, p)
+                canvas.drawLine(cx, cy + s * 0.08f, cx + s * 0.2f, cy - s * 0.14f, p)
+                canvas.drawCircle(cx, cy + s * 0.08f, s * 0.05f, p)
+            }
+            Kind.ARCHIVE -> {
+                r.set(cx - s * 0.42f, cy - s * 0.36f, cx + s * 0.42f, cy - s * 0.12f)
+                canvas.drawRoundRect(r, s * 0.04f, s * 0.04f, p)
+                r.set(cx - s * 0.36f, cy - s * 0.12f, cx + s * 0.36f, cy + s * 0.4f)
+                canvas.drawRoundRect(r, s * 0.04f, s * 0.04f, p)
+                canvas.drawLine(cx - s * 0.12f, cy + s * 0.04f, cx + s * 0.12f, cy + s * 0.04f, p)
+            }
+            Kind.GEAR -> {
+                canvas.drawCircle(cx, cy, s * 0.14f, p)
+                canvas.drawCircle(cx, cy, s * 0.3f, p)
+                for (k in 0 until 8) {
+                    val a = Math.toRadians(k * 45.0)
+                    canvas.drawLine(
+                        cx + Math.cos(a).toFloat() * s * 0.3f, cy + Math.sin(a).toFloat() * s * 0.3f,
+                        cx + Math.cos(a).toFloat() * s * 0.42f, cy + Math.sin(a).toFloat() * s * 0.42f, p,
+                    )
+                }
+            }
             Kind.MACRO -> {
                 for (k in 0 until 5) {
                     val a = Math.toRadians(k * 72.0 - 90)
@@ -227,5 +324,41 @@ class LineIcon(c: Context, private val kind: Kind, private val color: Int = Deco
                 canvas.drawLine(cx, cy + s * 0.16f, cx, cy + s * 0.44f, p)
             }
         }
+    }
+}
+
+/**
+ * A ticket's tear line: dashes across, a half-round notch at each end where it meets the card's
+ * edge (the references' boarding-pass cards). Set its side margins to minus the card's padding.
+ */
+@SuppressLint("ViewConstructor") // made in code only
+class TicketDivider(c: Context) : View(c) {
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val r = RectF()
+
+    override fun onDraw(canvas: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val notch = h / 2
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = maxOf(1f, h * 0.06f)
+        p.color = Deco.BORDER_STRONG
+        val dash = h * 0.35f
+        var x = notch * 2
+        while (x < w - notch * 2) {
+            canvas.drawLine(x, h / 2, minOf(x + dash, w - notch * 2), h / 2, p)
+            x += dash * 2
+        }
+        // The notches: the page's night showing through, rimmed like the card.
+        p.style = Paint.Style.FILL
+        p.color = Deco.BG
+        canvas.drawCircle(0f, h / 2, notch, p)
+        canvas.drawCircle(w, h / 2, notch, p)
+        p.style = Paint.Style.STROKE
+        p.color = Deco.BORDER
+        r.set(-notch, 0f, notch, h)
+        canvas.drawArc(r, -90f, 180f, false, p)
+        r.set(w - notch, 0f, w + notch, h)
+        canvas.drawArc(r, 90f, 180f, false, p)
     }
 }

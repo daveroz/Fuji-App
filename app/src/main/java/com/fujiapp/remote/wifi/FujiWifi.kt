@@ -347,6 +347,26 @@ class FujiWifi private constructor(
     fun capture(): Int = transact(INITIATE_CAPTURE, listOf(0, 0)).code
 
     /**
+     * The picture just taken, as the camera offers it after a shot (event 0xC001 "preview available"
+     * with the handle and the size): its ObjectInfo first (the camera serves an object only after
+     * that), then the object, or its bytes as a partial read. Until it's fetched the camera holds
+     * the shot on screen and the live view stands still, as XApp's postview step suggests.
+     */
+    fun postview(handle: Int, size: Int?): ByteArray? {
+        val info = transact(Ptp.GET_OBJECT_INFO, listOf(handle))
+        log("wifi: postview #%X info -> %s, %d bytes".format(handle, Ptp.responseName(info.code), info.data.size))
+        val whole = transact(Ptp.GET_OBJECT, listOf(handle))
+        log("wifi: postview #%X -> %s, %d bytes".format(handle, Ptp.responseName(whole.code), whole.data.size))
+        if (whole.ok && whole.data.size > 100) return whole.data
+        if (size != null && size > 0) {
+            val part = transact(GET_PARTIAL_OBJECT, listOf(handle, 0, size))
+            log("wifi: postview #%X partial -> %s, %d bytes".format(handle, Ptp.responseName(part.code), part.data.size))
+            if (part.ok && part.data.size > 100) return part.data
+        }
+        return null
+    }
+
+    /**
      * Half press (focus and lock), as XApp's touch AF: LockS1Lock with a focus point packed as
      * aspect width, aspect height, column, row (one byte each; columns and rows count from 1 on the
      * camera's grid). Without a point, the camera's current one (property 0xD17C) is used.
@@ -517,6 +537,9 @@ class FujiWifi private constructor(
         // operations
         const val GET_THUMB = 0x100A
         const val INITIATE_CAPTURE = 0x100E
+        /** Events: a picture was added; its preview is ready (handle, handle, size). */
+        const val EVENT_OBJECT_ADDED = 0xC004
+        const val EVENT_PREVIEW_AVAILABLE = 0xC001
         const val GET_DEVICE_PROP_DESC = 0x1014
         const val TERMINATE_OPEN_CAPTURE = 0x1018
         const val GET_PARTIAL_OBJECT = 0x101B

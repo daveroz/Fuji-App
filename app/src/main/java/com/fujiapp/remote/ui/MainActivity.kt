@@ -66,8 +66,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var remoteScreen: RemoteScreen
     private var afterWifiGrant: (() -> Unit)? = null
 
-    private enum class Tab(val title: String) {
-        CAMERA("Camera"), RECIPES("Recipes"), EQUIPMENT("Equipment"), BACKUPS("Backups"), SETTINGS("Settings")
+    private val tabIcons = HashMap<Tab, LineIcon>()
+
+    private enum class Tab(val title: String, val icon: LineIcon.Kind) {
+        CAMERA("Camera", LineIcon.Kind.SHOTS), RECIPES("Recipes", LineIcon.Kind.FILM), EQUIPMENT("Equipment", LineIcon.Kind.GAUGE),
+        BACKUPS("Backups", LineIcon.Kind.ARCHIVE), SETTINGS("Settings", LineIcon.Kind.GEAR)
     }
 
     private lateinit var connectScreen: ConnectScreen
@@ -203,6 +206,9 @@ class MainActivity : AppCompatActivity() {
                     wifi.frame.collect { if (cameraPage == CameraPage.REMOTE) remoteScreen.showFrame(it) }
                 }
                 launch {
+                    wifi.postview.collect { remoteScreen.showPostview(it) }
+                }
+                launch {
                     session.notice.collect { message ->
                         if (message != null) {
                             showNotice(message)
@@ -260,6 +266,8 @@ class MainActivity : AppCompatActivity() {
         val tabRow = Kit.row(c)
         for (t in Tab.entries) {
             val indicator = View(c)
+            val icon = LineIcon(c, t.icon, Deco.DIM)
+            tabIcons[t] = icon
             val label = Kit.label(c, t.title, Deco.DIM, 10f).apply {
                 gravity = Gravity.CENTER
                 maxLines = 1
@@ -268,9 +276,10 @@ class MainActivity : AppCompatActivity() {
             }
             tabRow.addView(Kit.column(c).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(0, 0, 0, Deco.dpi(c, 16))
+                setPadding(0, 0, 0, Deco.dpi(c, 12))
                 addView(indicator, LinearLayout.LayoutParams(Deco.dpi(c, 24), Deco.dpi(c, 2)))
-                addView(label, Kit.lp(top = Deco.dpi(c, 14)))
+                addView(icon, LinearLayout.LayoutParams(Deco.dpi(c, 22), Deco.dpi(c, 22)).apply { topMargin = Deco.dpi(c, 10) })
+                addView(label, Kit.lp(top = Deco.dpi(c, 6)))
                 isClickable = true
                 setOnClickListener { select(t) }
             }, Kit.lp(0, weight = 1f))
@@ -328,6 +337,7 @@ class MainActivity : AppCompatActivity() {
             val on = k == t
             v.first.background = if (on) Deco.box(this, Deco.AMBER, 0, 1f) else null
             v.second.setTextColor(if (on) Deco.TEXT else Deco.DIM)
+            tabIcons[k]?.tint = if (on) Deco.AMBER_LIGHT else Deco.DIM
         }
         if (t == Tab.BACKUPS) backupsScreen.refreshList()
         render()

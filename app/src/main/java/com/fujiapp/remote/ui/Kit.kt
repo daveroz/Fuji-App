@@ -23,7 +23,9 @@ import com.fujiapp.remote.model.CameraInfo
 object Kit {
 
     const val PAGE_MARGIN = 24
-    private const val PANEL_RADIUS = 20f
+    private const val PANEL_RADIUS = 22f
+    /** Buttons are pills, like the references' big rounded actions. */
+    private const val BUTTON_RADIUS = 26f
 
     val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
     val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -87,14 +89,14 @@ object Kit {
         )
     }
 
-    /** A titled glass panel of readings, with hairlines between them. */
+    /**
+     * A titled glass card of readings, laid out like the references' details: each label above its
+     * value, two to a line (a long value takes the line), thin rules between lines.
+     */
     fun sectionPanel(c: Context, section: CameraInfo.Section): View = column(c).apply {
         addView(sectionTitle(c, section.title))
-        addView(panel(c).apply {
-            section.rows.forEachIndexed { i, r ->
-                if (i > 0) addView(hairline(c))
-                addView(readout(c, r.label, r.value))
-            }
+        addView(panel(c, padV = 6).apply {
+            addView(Layouts.fieldGrid(c, section.rows.map { it.label to it.value }))
         })
     }
 
@@ -130,9 +132,9 @@ object Kit {
         val inset = if (style == Style.PRIMARY) Deco.dpi(c, Deco.Lit.INSET_DP.toInt()) else 0
         setPadding(Deco.dpi(c, 20) + inset, inset, Deco.dpi(c, 20) + inset, inset)
         background = when (style) {
-            Style.PRIMARY -> Deco.pressable(Deco.lit(c, 16f), Deco.lit(c, 16f, pressed = true))
-            Style.SECONDARY -> Deco.pressable(Deco.glass(c, 16f), Deco.box(c, Deco.SURFACE_HI, Deco.BORDER_STRONG, 16f))
-            Style.QUIET -> Deco.pressable(Deco.box(c, 0, 0, 16f), Deco.box(c, Deco.GLASS, 0, 16f))
+            Style.PRIMARY -> Deco.pressable(Deco.lit(c, BUTTON_RADIUS), Deco.lit(c, BUTTON_RADIUS, pressed = true))
+            Style.SECONDARY -> Deco.pressable(Deco.glass(c, BUTTON_RADIUS), Deco.box(c, Deco.SURFACE_HI, Deco.BORDER_STRONG, BUTTON_RADIUS))
+            Style.QUIET -> Deco.pressable(Deco.box(c, 0, 0, BUTTON_RADIUS), Deco.box(c, Deco.GLASS, 0, BUTTON_RADIUS))
         }
         isClickable = true
         isFocusable = true

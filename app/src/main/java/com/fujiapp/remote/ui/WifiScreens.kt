@@ -139,9 +139,19 @@ class RemoteScreen(private val a: MainActivity) {
         }
         visibility = View.GONE
     }
+    /** The picture just taken, shown for a moment over the live view. */
+    private val postview = ImageView(c).apply {
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        setBackgroundColor(0xFF000000.toInt())
+        visibility = View.GONE
+        contentDescription = "The picture just taken"
+    }
     private val frame = FrameLayout(c).apply {
-        background = Deco.box(c, 0xFF000000.toInt(), Deco.BORDER_SOFT, 6f)
+        background = Deco.box(c, 0xFF000000.toInt(), Deco.BORDER_SOFT, 16f)
+        outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+        clipToOutline = true
         addView(live, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
+        addView(postview, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
         addView(marker, FrameLayout.LayoutParams(Deco.dpi(c, MARKER_DP), Deco.dpi(c, MARKER_DP)))
     }
 
@@ -157,6 +167,9 @@ class RemoteScreen(private val a: MainActivity) {
     private val shotsValue = Kit.text(c, "", 15f, Deco.TEXT_SOFT, bold = true).apply { gravity = Gravity.END }
     private val apertureSteps = steps({ a.wifi.stepAperture(false) }, { a.wifi.stepAperture(true) }, "aperture")
     private val shutterSteps = steps({ a.wifi.stepShutter(false) }, { a.wifi.stepShutter(true) }, "shutter speed")
+    /** In place of the steps when the camera picks the value (its mode, or a dial on A). */
+    private val apertureAuto = autoBadge()
+    private val shutterAuto = autoBadge()
 
     // The tiles (Leica's grid), as XApp's remote offers these settings.
     private val filmTile = Layouts.Tile(c, LineIcon.Kind.FILM, "Film sim") { pickSetting(FujiWifi.FILM_SIMULATION, "Film simulation") }
@@ -187,7 +200,7 @@ class RemoteScreen(private val a: MainActivity) {
         addView(progress, Kit.lp(top = Deco.dpi(c, 4)))
         addView(frame, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 206)).apply { topMargin = Deco.dpi(c, 8) })
         addView(Layouts.hero(c).apply {
-            setPadding(Deco.dpi(c, 14), Deco.dpi(c, 10), Deco.dpi(c, 14), Deco.dpi(c, 10))
+            setPadding(Deco.dpi(c, 16), Deco.dpi(c, 12), Deco.dpi(c, 16), Deco.dpi(c, 12))
             addView(Kit.row(c).apply {
                 addView(topLine, Kit.lp(0, weight = 1f))
                 addView(battery, Kit.lp(Kit.WRAP))
@@ -196,12 +209,18 @@ class RemoteScreen(private val a: MainActivity) {
                 gravity = Gravity.BOTTOM
                 addView(Kit.column(c).apply {
                     addView(apertureValue)
-                    addView(apertureSteps)
+                    addView(FrameLayout(c).apply {
+                        addView(apertureSteps)
+                        addView(apertureAuto, FrameLayout.LayoutParams(Kit.WRAP, Kit.WRAP, Gravity.CENTER_VERTICAL or Gravity.START))
+                    }, Kit.lp(top = Deco.dpi(c, 6)))
                 }, Kit.lp(0, weight = 1f))
                 addView(Kit.column(c).apply {
                     gravity = Gravity.END
                     addView(shutterValue, Kit.lp(Kit.MATCH))
-                    addView(shutterSteps, Kit.lp(Kit.WRAP).apply { gravity = Gravity.END })
+                    addView(FrameLayout(c).apply {
+                        addView(shutterSteps, FrameLayout.LayoutParams(Kit.WRAP, Kit.WRAP, Gravity.END))
+                        addView(shutterAuto, FrameLayout.LayoutParams(Kit.WRAP, Kit.WRAP, Gravity.CENTER_VERTICAL or Gravity.END))
+                    }, Kit.lp(Kit.MATCH).apply { topMargin = Deco.dpi(c, 6) })
                 }, Kit.lp(0, weight = 1f))
             }, Kit.lp(top = Deco.dpi(c, 2)))
             addView(Kit.row(c).apply {
@@ -240,18 +259,33 @@ class RemoteScreen(private val a: MainActivity) {
 
     private fun big() = Kit.text(c, "—", 32f, Deco.TEXT, bold = true).apply { maxLines = 1 }
 
-    private fun chevron(t: String, description: String, onClick: () -> Unit) = Kit.button(c, t, Kit.Style.QUIET, onClick).apply {
-        minHeight = 0
-        minWidth = 0
-        minimumWidth = 0
-        textSize = 20f
-        setPadding(Deco.dpi(c, 10), 0, Deco.dpi(c, 10), 0)
+    /** A round step button, big enough for a thumb (44 dp). */
+    private fun chevron(t: String, description: String, onClick: () -> Unit): View = Kit.text(c, t, 24f, Deco.AMBER_LIGHT, bold = true).apply {
+        gravity = Gravity.CENTER
+        includeFontPadding = false
+        background = Deco.pressable(Deco.box(c, Deco.WELL, Deco.BORDER_STRONG, 22f), Deco.box(c, Deco.KEY_GLASS_HI, Deco.AMBER, 22f))
+        isClickable = true
+        isFocusable = true
         contentDescription = description
+        setOnClickListener {
+            performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+            onClick()
+        }
+        layoutParams = LinearLayout.LayoutParams(Deco.dpi(c, STEP_DP), Deco.dpi(c, STEP_DP))
     }
 
     private fun steps(down: () -> Unit, up: () -> Unit, what: String): View = Kit.row(c).apply {
         addView(chevron("‹", "Lower $what", down))
-        addView(chevron("›", "Higher $what", up))
+        addView(chevron("›", "Higher $what", up), LinearLayout.LayoutParams(Deco.dpi(c, STEP_DP), Deco.dpi(c, STEP_DP)).apply { marginStart = Deco.dpi(c, 10) })
+    }
+
+    /** "AUTO", lit: the camera picks this value. */
+    private fun autoBadge(): View = Kit.label(c, "AUTO", Deco.AMBER_LIGHT, 10f).apply {
+        gravity = Gravity.CENTER
+        background = Deco.box(c, Deco.KEY_GLASS, Deco.AMBER, 14f)
+        setPadding(Deco.dpi(c, 14), Deco.dpi(c, 8), Deco.dpi(c, 14), Deco.dpi(c, 8))
+        visibility = View.GONE
+        contentDescription = "Set by the camera"
     }
 
     private fun pickIso() {
@@ -329,6 +363,11 @@ class RemoteScreen(private val a: MainActivity) {
         if (frame != null) live.setImageBitmap(frame)
     }
 
+    fun showPostview(shot: Bitmap?) {
+        if (shot != null) postview.setImageBitmap(shot)
+        postview.isVisible = shot != null
+    }
+
     fun render() {
         val w = a.wifi
         val phase = w.phase.value
@@ -348,10 +387,14 @@ class RemoteScreen(private val a: MainActivity) {
         }
         isoTile.enable(ready)
         isoTile.set(w.currentValue(FujiWifi.ISO)?.let(::isoName)?.uppercase() ?: "—")
-        // In P and A the camera picks the shutter speed; in P and S, the aperture.
+        // In P and A the camera picks the shutter speed; in P and S, the aperture: say so, plainly.
         val exposureMode = w.currentValue(FujiWifi.SHOOTING_MODE)
-        shutterSteps.alpha = if (exposureMode == 2L || exposureMode == 3L) 0.35f else 1f
-        apertureSteps.alpha = if (exposureMode == 2L || exposureMode == 4L) 0.35f else 1f
+        val shutterIsAuto = exposureMode == 2L || exposureMode == 3L
+        val apertureIsAuto = exposureMode == 2L || exposureMode == 4L
+        shutterSteps.isVisible = !shutterIsAuto
+        shutterAuto.isVisible = shutterIsAuto
+        apertureSteps.isVisible = !apertureIsAuto
+        apertureAuto.isVisible = apertureIsAuto
         val focused = w.focused.value
         focusButton.text = if (focused) "Let go of focus" else "Focus"
         if (focused) marker.alpha = 1f else if (!ready) marker.isVisible = false
@@ -379,6 +422,7 @@ class RemoteScreen(private val a: MainActivity) {
 
     private companion object {
         const val MARKER_DP = 44
+        const val STEP_DP = 44
     }
 }
 

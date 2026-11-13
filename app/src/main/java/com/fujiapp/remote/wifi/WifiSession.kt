@@ -299,6 +299,12 @@ class WifiSession(context: Context, private val camera: CameraSession) {
             while (isActive) {
                 val (code, params) = w.nextEvent() ?: break
                 AppLog.add("remote: event 0x%04X %s".format(code, params.joinToString(",") { "0x%X".format(it) }))
+                // After a shot the camera offers its preview and waits for it: fetch it (and show it).
+                if (code == FujiWifi.EVENT_PREVIEW_AVAILABLE && params.isNotEmpty()) {
+                    val handle = params[0]
+                    val size = params.getOrNull(2)
+                    scope.launch { fetchPostview(w, handle, size) }
+                }
             }
         }
         // The camera's dials win over the app: follow them as they turn (XApp polls the same list).
@@ -309,6 +315,22 @@ class WifiSession(context: Context, private val camera: CameraSession) {
                 runCatching { refreshReadings(full = ++n % FULL_EVERY == 0) }.onFailure { AppLog.add("remote: poll failed: ${it.message}") }
             }
         }
+    }
+
+    private val _postview = MutableStateFlow<Bitmap?>(null)
+    /** The picture just taken, shown for a moment over the live view. */
+    val postview: StateFlow<Bitmap?> = _postview.asStateFlow()
+
+    private suspend fun fetchPostview(w: FujiWifi, handle: Int, size: Int?) {
+        val bytes = io.withLock { withContext(Dispatchers.IO) { runCatching { w.postview(handle, size) }.getOrNull() } }
+        if (bytes == null) {
+            AppLog.add("wifi: the camera didn't hand over the shot's preview")
+            return
+        }
+        val bmp = withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) } ?: return
+        _postview.value = bmp
+        delay(POSTVIEW_MS)
+        if (_postview.value === bmp) _postview.value = null
     }
 
     /** Take a picture over Wi-Fi; if the camera won't, use the Bluetooth release. */
@@ -570,6 +592,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         val events = eventJob
         eventJob = null
         _frame.value = null
+        _postview.value = null
         // A camera left in the middle of a shot (or cut off before it heard goodbye) can hang until
         // its battery comes out: let a fresh shot finish, end the session over the network, and
         // only then let Android drop the camera's Wi-Fi.
@@ -615,6 +638,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         private const val JOIN_RETRY_WITHIN_MS = 20_000L
         /** How long a picture takes to finish (write, review) before the session may end. */
         private const val CAPTURE_SETTLE_MS = 6_000L
+        private const val POSTVIEW_MS = 2_000L
         const val USB_PLUGGED = "The camera is connected by USB, and won't start its Wi-Fi like that. Unplug the cable, then try again."
         /** Every this many polls, read the shown properties directly too. */
         private const val FULL_EVERY = 10

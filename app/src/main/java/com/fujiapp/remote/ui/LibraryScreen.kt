@@ -54,19 +54,20 @@ class LibraryScreen(private val a: MainActivity) {
         }
     }
 
-    private fun card(item: LibraryRecipe): View = Kit.panel(c, padV = 16).apply {
+    /** A recipe as a ticket: its palette, name and source, the film and range as fields, a tear line, then actions. */
+    private fun card(item: LibraryRecipe): View = Kit.panel(c, padH = CARD_PAD, padV = 18).apply {
         val open = item.id in expanded
         if (item.palette.isNotEmpty()) addView(Kit.palette(c, item.palette), Kit.lp(bottom = Deco.dpi(c, 14)))
         addView(Kit.text(c, item.title, 18f, Deco.TEXT, bold = true))
         addView(Kit.label(c, item.source, Deco.DIM, 10f), Kit.lp(top = Deco.dpi(c, 6)))
-        addView(Kit.label(c, "${item.recipe.filmSim.label} · ${item.recipe.dynamicRange.label}", Deco.AMBER_LIGHT, 10f), Kit.lp(top = Deco.dpi(c, 6)))
+        addView(Kit.row(c).apply {
+            addView(Layouts.field(c, "FILM SIMULATION", item.recipe.filmSim.label), Kit.lp(0, weight = 1.4f))
+            addView(Layouts.field(c, "DYNAMIC RANGE", item.recipe.dynamicRange.label, end = true), Kit.lp(0, weight = 1f))
+        }, Kit.lp(top = Deco.dpi(c, 14)))
         if (item.look.isNotBlank()) addView(Kit.text(c, item.look, 14f, Deco.TEXT_SOFT), Kit.lp(top = Deco.dpi(c, 12)))
         if (open) {
             addView(Kit.hairline(c), Kit.lp(top = Deco.dpi(c, 14)))
-            item.recipe.rows().forEachIndexed { i, (label, value) ->
-                if (i > 0) addView(Kit.hairline(c))
-                addView(Kit.readout(c, label, value))
-            }
+            addView(Layouts.fieldGrid(c, item.recipe.rows()))
             if (item.how.isNotBlank()) {
                 addView(Kit.label(c, "How it gets there", Deco.AMBER_LIGHT, 10f), Kit.lp(top = Deco.dpi(c, 14)))
                 addView(Kit.text(c, item.how, 14f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 6)))
@@ -76,6 +77,11 @@ class LibraryScreen(private val a: MainActivity) {
                 addView(Kit.text(c, item.tips, 14f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 6)))
             }
         }
+        addView(TicketDivider(c), android.widget.LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 18)).apply {
+            topMargin = Deco.dpi(c, 14)
+            marginStart = -Deco.dpi(c, CARD_PAD)
+            marginEnd = -Deco.dpi(c, CARD_PAD)
+        })
         addView(Kit.row(c).apply {
             addView(Kit.button(c, if (open) "Less" else "Details", Kit.Style.QUIET) {
                 if (!expanded.remove(item.id)) expanded.add(item.id)
@@ -87,5 +93,9 @@ class LibraryScreen(private val a: MainActivity) {
         if (item.group == LibraryRecipe.Group.MINE) {
             addView(Kit.button(c, "Delete", Kit.Style.QUIET) { a.recipeFlow.deleteMine(item) }, Kit.lp(top = Deco.dpi(c, 6)))
         }
+    }
+
+    private companion object {
+        const val CARD_PAD = 18
     }
 }
