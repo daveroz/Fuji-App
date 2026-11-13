@@ -270,37 +270,23 @@ class GlassDrawable(
 }
 
 /**
- * The key action: solid amber, a rounded square, with a soft glow around it (drawn once per size into a
- * picture, inside an inset that leaves room for the glow).
+ * The key action: solid amber, a rounded square, lit a little from above. It fills its bounds
+ * exactly, so it lines up with the glass around it.
  */
 class KeyDrawable(context: Context, private val radius: Float, private val pressed: Boolean = false) : Drawable() {
     private val density = context.resources.displayMetrics.density
-    private val inset = 4 * density
-    private var picture: Bitmap? = null
+    private val path = android.graphics.Path()
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
 
     override fun onBoundsChange(bounds: Rect) {
-        picture = null
+        val r = RectF(bounds)
+        roundedPath(path, r, if (radius < 0) GlassDrawable.CONTROL_RADIUS_DP * density else radius)
+        val top = if (pressed) 0xFFE99A4C.toInt() else 0xFFF2A65C.toInt()
+        p.shader = LinearGradient(0f, r.top, 0f, r.bottom, top, if (pressed) Deco.AMBER_DEEP else 0xFFDB862F.toInt(), Shader.TileMode.CLAMP)
     }
 
     override fun draw(canvas: Canvas) {
-        val b = bounds
-        if (b.width() <= 0 || b.height() <= 0) return
-        val pic = picture ?: createBitmap(b.width(), b.height()).also { bmp ->
-            val c = Canvas(bmp)
-            val r = RectF(inset, inset, b.width() - inset, b.height() - inset)
-            val rad = if (radius < 0) GlassDrawable.CONTROL_RADIUS_DP * density else radius
-            val path = android.graphics.Path().also { roundedPath(it, r, rad) }
-            c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = if (pressed) 0x80EB9438.toInt() else 0x47EB9438
-                maskFilter = BlurMaskFilter(inset, BlurMaskFilter.Blur.OUTER)
-            })
-            val top = if (pressed) 0xFFE99A4C.toInt() else 0xFFF2A65C.toInt()
-            c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                shader = LinearGradient(0f, r.top, 0f, r.bottom, top, if (pressed) Deco.AMBER_DEEP else 0xFFDB862F.toInt(), Shader.TileMode.CLAMP)
-            })
-            picture = bmp
-        }
-        canvas.drawBitmap(pic, b.left.toFloat(), b.top.toFloat(), null)
+        canvas.drawPath(path, p)
     }
 
     override fun setAlpha(alpha: Int) = Unit
@@ -346,7 +332,7 @@ class LedDrawable(var color: Int) : Drawable() {
 }
 
 /**
- * The shutter: an amber ring lit like a lamp, glowing into the haze, around a warm glass button.
+ * The shutter: an amber ring around a warm glass button, filling its bounds.
  * Pressed, the button lights up; busy ([dim]), it fades.
  */
 class ShutterDrawable(context: Context, private val pressed: Boolean = false) : Drawable() {
@@ -364,18 +350,15 @@ class ShutterDrawable(context: Context, private val pressed: Boolean = false) : 
             val c = Canvas(bmp)
             val cx = b.width() / 2f
             val cy = b.height() / 2f
-            val outer = min(cx, cy) - 6 * d
+            // The ring's outer edge is the view's edge, so the shutter lines up with what's beside it.
+            val outer = min(cx, cy) - 1.5f * d
             val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE
                 strokeWidth = 3 * d
-                color = 0x99EB9438.toInt()
-                maskFilter = BlurMaskFilter(6 * d, BlurMaskFilter.Blur.NORMAL)
+                color = Deco.AMBER
             }
             c.drawCircle(cx, cy, outer, ring)
-            ring.maskFilter = null
-            ring.color = Deco.AMBER
-            c.drawCircle(cx, cy, outer, ring)
-            val disc = outer * 0.74f
+            val disc = outer * 0.78f
             c.drawCircle(cx, cy, disc, Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 shader = RadialGradient(cx, cy - disc * 0.5f, disc * 1.5f,
                     if (pressed) intArrayOf(0xFFFFF6EA.toInt(), 0xFFF6C08A.toInt(), Deco.AMBER) else intArrayOf(0xF2FFECD6.toInt(), 0xD9F0AE6A.toInt(), 0xE6C97624.toInt()),
@@ -397,14 +380,13 @@ class ShutterDrawable(context: Context, private val pressed: Boolean = false) : 
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }
 
-/** An on/off switch: a glass well, and a knob that lights up amber when on. */
+/** An on/off switch: a glass well, and a knob on an amber wash when on; it fills its bounds. */
 @SuppressLint("ViewConstructor") // made in code only
 class GlassSwitch(c: Context) : View(c) {
     private val d = c.resources.displayMetrics.density
     private val well = GlassDrawable(c, -1f, tone = GlassDrawable.Tone.WELL)
     private val on = Paint(Paint.ANTI_ALIAS_FLAG)
     private val knob = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
     private val r = RectF()
 
     var checked = false
@@ -415,13 +397,12 @@ class GlassSwitch(c: Context) : View(c) {
 
     init {
         well.callback = this
-        setLayerType(LAYER_TYPE_SOFTWARE, null) // for the knob's glow
     }
 
     override fun verifyDrawable(who: Drawable): Boolean = who === well || super.verifyDrawable(who)
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        setMeasuredDimension((54 * d).roundToInt(), (34 * d).roundToInt())
+        setMeasuredDimension((50 * d).roundToInt(), (30 * d).roundToInt())
     }
 
     private var onShader: Shader? = null
@@ -429,8 +410,7 @@ class GlassSwitch(c: Context) : View(c) {
     private var knobOff: Shader? = null
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        val pad = 2 * d
-        r.set(pad, pad, w - pad, h - pad)
+        r.set(0f, 0f, w.toFloat(), h.toFloat())
         well.setBounds(r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
         val rad = r.height() / 2
         val kr = rad - 3 * d
@@ -438,8 +418,6 @@ class GlassSwitch(c: Context) : View(c) {
         val ky = r.centerY()
         knobOn = RadialGradient(r.right - rad, ky - kr * 0.6f, kr * 1.8f, intArrayOf(0xFFFFF8EF.toInt(), 0xFFF0D2AE.toInt()), null, Shader.TileMode.CLAMP)
         knobOff = RadialGradient(r.left + rad, ky - kr * 0.6f, kr * 1.8f, intArrayOf(0xFF4E5157.toInt(), 0xFF1E1F23.toInt()), null, Shader.TileMode.CLAMP)
-        glow.color = 0x66EB9438
-        glow.maskFilter = BlurMaskFilter(5 * d, BlurMaskFilter.Blur.NORMAL)
         on.shader = onShader
         roundedPath(trackPath, r, GlassDrawable.CONTROL_RADIUS_DP * d)
         val k = RectF(r.right - rad - kr, ky - kr, r.right - rad + kr, ky + kr)
@@ -455,7 +433,6 @@ class GlassSwitch(c: Context) : View(c) {
     override fun onDraw(canvas: Canvas) {
         well.draw(canvas)
         if (checked) canvas.drawPath(trackPath, on)
-        if (checked) canvas.drawPath(knobOnPath, glow)
         knob.shader = if (checked) knobOn else knobOff
         canvas.drawPath(if (checked) knobOnPath else knobOffPath, knob)
     }

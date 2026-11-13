@@ -161,6 +161,11 @@ groups, the Library's All / Film stocks / Cinema / My recipes), the chosen one a
 Only the shutter (a camera's round button) and the status lamps are round. In the Lab the preview
 is kept short (150–200 dp) so the settings under it have room.
 
+**Everything lines up**: every shape fills its bounds exactly (no glow reserved around the amber
+key, a chosen chip or the shutter), so edges meet the page margins and gaps are even. A set of
+choices (grain, Color Chrome, dynamic range, the location interval) is a row of equal cells across
+the full width, in even rows when it needs more than one; the chosen one is lit, never resized.
+
 The **tab bar floats** over the page, the chosen tab a lighter pane. Status lights are small lamps
 with a glow, the remote's exposure scale is a row of thin marks with the value lit, Equipment shows
 the shutter's actuations as a **ring of 60 lamps** lit to the share of its rated life, and backups

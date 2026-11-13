@@ -1,14 +1,10 @@
 package com.fujiapp.remote.ui
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.PixelFormat
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -16,7 +12,6 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.StateListDrawable
 import android.util.TypedValue
 import android.widget.TextView
-import androidx.core.graphics.createBitmap
 
 /**
  * The Deco "light in fog" visual language, shared with Worldly, the Deco launcher and SAB Monitor:
@@ -103,19 +98,19 @@ object Deco {
     fun bubble(c: Context, sizeDp: Float, pressed: Boolean = false): Drawable =
         GlassDrawable(c, 0f, round = true, pressed = pressed)
 
-    /** The key action: solid amber, glowing. Text on it is [KeyDrawable.INK]. */
+    /** The key action: solid amber, filling its bounds. Text on it is [KeyDrawable.INK]. */
     fun key(c: Context, radiusDp: Float): Drawable =
         pressable(KeyDrawable(c, if (radiusDp < 0) -1f else dp(c, radiusDp)), KeyDrawable(c, if (radiusDp < 0) -1f else dp(c, radiusDp), pressed = true))
-
-    /** Room a [key] leaves around itself for its glow. */
-    fun keyInset(c: Context): Int = dpi(c, 4)
 
     /** A status lamp with its glow: give the view about three times the lamp's size. */
     fun led(color: Int): Drawable = LedDrawable(color)
 
-    /** Something that's on: a touch of the key light on a pane of glass, a key edge and a soft glow outside it. */
+    /**
+     * Something that's on: a touch of the key light on the glass and an amber edge. It fills its
+     * bounds exactly, as every shape does, so a chosen option is the same size as the others.
+     */
     fun lit(c: Context, radiusDp: Float, pressed: Boolean = false): Drawable =
-        Lit(dp(c, radiusDp), dp(c, Lit.INSET_DP), dp(c, 1f), if (pressed) KEY_GLASS_HI else KEY_GLASS)
+        Lit(dp(c, radiusDp), Math.max(1f, dp(c, 1.2f)), if (pressed) KEY_GLASS_HI else KEY_GLASS)
 
     fun pressable(normal: Drawable, pressed: Drawable): StateListDrawable = StateListDrawable().apply {
         addState(intArrayOf(android.R.attr.state_pressed), pressed)
@@ -131,52 +126,32 @@ object Deco {
         t.setTextColor(color)
     }
 
-    /** The lit look, drawn once into a picture whenever its size changes (a blur can't be drawn live everywhere). */
-    class Lit(private val radius: Float, private val inset: Float, private val line: Float, private val fill: Int) : Drawable() {
-        private var picture: Bitmap? = null
+    /** The lit look: an amber wash and an amber edge, within the bounds. */
+    class Lit(private val radius: Float, private val line: Float, private val fill: Int) : Drawable() {
+        private val shape = android.graphics.Path()
+        private val edge = android.graphics.Path()
+        private val p = Paint(Paint.ANTI_ALIAS_FLAG)
 
         override fun onBoundsChange(bounds: Rect) {
-            picture = null
+            val r = RectF(bounds)
+            roundedPath(shape, r, radius)
+            val h = line / 2
+            roundedPath(edge, RectF(r.left + h, r.top + h, r.right - h, r.bottom - h), radius - h)
         }
 
         override fun draw(canvas: Canvas) {
-            val b = bounds
-            if (b.width() <= 0 || b.height() <= 0) return
-            val pic = picture ?: createBitmap(b.width(), b.height()).also { bmp ->
-                val c = Canvas(bmp)
-                val r = RectF(inset, inset, b.width() - inset, b.height() - inset)
-                val shape = android.graphics.Path().also { roundedPath(it, r, radius) }
-                val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    style = Paint.Style.STROKE
-                    strokeWidth = inset * 0.9f
-                    color = 0x59EB9438
-                    maskFilter = BlurMaskFilter(inset * 0.9f, BlurMaskFilter.Blur.NORMAL)
-                }
-                c.drawPath(shape, glow)
-                val p = Paint(Paint.ANTI_ALIAS_FLAG)
-                p.xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
-                c.drawPath(shape, p) // the glow is only outside; inside is glass
-                p.xfermode = null
-                p.color = fill
-                c.drawPath(shape, p)
-                p.style = Paint.Style.STROKE
-                p.strokeWidth = line
-                p.color = KEY_EDGE
-                val h = line / 2
-                val edge = android.graphics.Path().also { roundedPath(it, RectF(r.left + h, r.top + h, r.right - h, r.bottom - h), radius - h) }
-                c.drawPath(edge, p)
-                picture = bmp
-            }
-            canvas.drawBitmap(pic, b.left.toFloat(), b.top.toFloat(), null)
+            p.style = Paint.Style.FILL
+            p.color = fill
+            canvas.drawPath(shape, p)
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = line
+            p.color = KEY_EDGE
+            canvas.drawPath(edge, p)
         }
 
         override fun setAlpha(alpha: Int) = Unit
         override fun setColorFilter(colorFilter: ColorFilter?) = Unit
         @Deprecated("Deprecated in Java")
         override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
-
-        companion object {
-            const val INSET_DP = 3f
-        }
     }
 }

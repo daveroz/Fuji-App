@@ -100,7 +100,7 @@ class PhotosScreen(private val a: MainActivity) {
     private fun tile(cp: CardPhoto): View = Kit.column(c).apply {
         val on = cp.photo.handle in selected
         background = if (on) Deco.lit(c, 10f) else Deco.glass(c, 10f)
-        val inset = Deco.dpi(c, Deco.Lit.INSET_DP.toInt()) + Deco.dpi(c, 3)
+        val inset = Deco.dpi(c, 6)
         setPadding(inset, inset, inset, inset)
         addView(ImageView(c).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -304,8 +304,7 @@ class RemoteScreen(private val a: MainActivity) {
     private fun autoBadge(): View = Kit.label(c, "Auto", Deco.AMBER_LIGHT, 10f).apply {
         gravity = Gravity.CENTER
         background = Deco.lit(c, 10f)
-        val inset = Deco.dpi(c, Deco.Lit.INSET_DP.toInt())
-        setPadding(Deco.dpi(c, 18) + inset, Deco.dpi(c, 7) + inset, Deco.dpi(c, 18) + inset, Deco.dpi(c, 7) + inset)
+        setPadding(Deco.dpi(c, 18), Deco.dpi(c, 9), Deco.dpi(c, 18), Deco.dpi(c, 9))
         visibility = View.GONE
         contentDescription = "Set by the camera"
     }

@@ -157,7 +157,8 @@ class LabScreen(private val a: MainActivity) {
     )
     private val controls = FrameLayout(c)
     private val tabs = Kit.Segmented(c, listOf("Film", "Color", "Light", "Tone", "Detail")) { showGroup(it) }
-    private val scopeToggle = Kit.Chips(c, listOf("Scope")) { toggleScope() }
+    // As tall as the tabs beside it.
+    private val scopeToggle = Kit.Chips(c, listOf("Scope"), heightDp = 48) { toggleScope() }
 
     /** The preview's box: the picture sits inside it with an even margin and matching corners. */
     private val frame = FrameLayout(c).apply {
@@ -190,7 +191,7 @@ class LabScreen(private val a: MainActivity) {
         addView(frame, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, FRAME_DP)).apply { topMargin = Deco.dpi(c, 8) })
         addView(Kit.row(c).apply {
             addView(tabs.view, Kit.lp(0, weight = 1f))
-            addView(scopeToggle.view, Kit.lp(Kit.WRAP).apply { marginStart = Deco.dpi(c, 4) })
+            addView(scopeToggle.view, Kit.lp(Kit.WRAP).apply { marginStart = Deco.dpi(c, 8) })
         }, Kit.lp(top = Deco.dpi(c, 8)))
         addView(ScrollView(c).apply {
             isVerticalScrollBarEnabled = false

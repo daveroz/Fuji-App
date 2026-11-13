@@ -10,7 +10,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.isGone
@@ -149,9 +148,8 @@ object Kit {
             compoundDrawablePadding = Deco.dpi(c, 8)
         }
         gravity = Gravity.CENTER
-        val inset = if (style == Style.PRIMARY) Deco.keyInset(c) else 0
-        minHeight = Deco.dpi(c, if (compact) 44 else 52) + 2 * inset
-        setPadding(Deco.dpi(c, 14) + inset, inset, Deco.dpi(c, 14) + inset, inset)
+        minHeight = Deco.dpi(c, if (compact) 44 else 52)
+        setPadding(Deco.dpi(c, 14), 0, Deco.dpi(c, 14), 0)
         background = when (style) {
             Style.PRIMARY -> Deco.key(c, -1f)
             Style.SECONDARY -> Deco.glassPressable(c, -1f)
@@ -256,43 +254,33 @@ object Kit {
         }
     }
 
-    /** A row of choices; the chosen one is lit. */
-    class Chips(c: Context, private val options: List<String>, wrap: Boolean = false, private val onPick: (Int) -> Unit) {
+    /**
+     * A set of choices as equal cells: every option the same width and height, edge to edge across
+     * the row with equal gaps (in as many even rows as it takes), the chosen one lit but never
+     * bigger or smaller than the rest. Labels shrink to fit their cell.
+     */
+    class Chips(c: Context, private val options: List<String>, heightDp: Int = 38, private val onPick: (Int) -> Unit) {
         private val ctx = c
-        private val strip: ViewGroup = if (wrap) FlowLayout(c, Deco.dpi(c, 6), Deco.dpi(c, 6)) else row(c)
+        private val grid = ChipGrid(c, Deco.dpi(c, CHIP_GAP), Deco.dpi(c, heightDp))
         private val chips = options.mapIndexed { i, o ->
             label(c, o, Deco.MUTED, 11f).apply {
                 gravity = Gravity.CENTER
-                minWidth = Deco.dpi(c, 56)
-                minHeight = Deco.dpi(c, 38)
+                maxLines = 1
+                letterSpacing = 0.12f
+                setAutoSizeTextTypeUniformWithConfiguration(7, 11, 1, TypedValue.COMPLEX_UNIT_SP)
+                setPadding(Deco.dpi(c, 8), 0, Deco.dpi(c, 8), 0)
+                background = Deco.glass(c, 10f)
                 isClickable = true
                 setOnClickListener { onPick(i) }
-            }.also {
-                if (wrap) strip.addView(it, ViewGroup.LayoutParams(WRAP, WRAP))
-                else strip.addView(it, LinearLayout.LayoutParams(WRAP, WRAP).apply { marginEnd = Deco.dpi(c, 6) })
-            }
+            }.also { grid.addView(it) }
         }
-        /** All choices visible ([wrap]: in lines), or one scrolling row. */
-        val view: View = if (wrap) strip else HorizontalScrollView(c).apply {
-            isHorizontalScrollBarEnabled = false
-            addView(strip)
-        }
-
-        private var selected: Int? = null
+        val view: View = grid
 
         fun select(index: Int?) {
-            // A newly chosen chip out of sight in a scrolling row is brought into view.
-            if (index != selected && index != null && view is HorizontalScrollView) {
-                val chip = chips.getOrNull(index)
-                if (chip != null) view.post { view.smoothScrollTo(maxOf(0, chip.left - Deco.dpi(ctx, 24)), 0) }
-            }
-            selected = index
-            val inset = Deco.dpi(ctx, Deco.Lit.INSET_DP.toInt())
             chips.forEachIndexed { i, chip ->
                 val on = i == index
                 chip.setTextColor(if (on) Deco.AMBER_LIGHT else Deco.MUTED)
                 chip.background = if (on) Deco.lit(ctx, 10f) else Deco.glass(ctx, 10f)
-                chip.setPadding(inset + Deco.dpi(ctx, 10), inset, inset + Deco.dpi(ctx, 10), inset)
             }
         }
 
@@ -301,6 +289,8 @@ object Kit {
             chips.forEach { it.isEnabled = on }
         }
     }
+
+    private const val CHIP_GAP = 8
 
     /** A setting on a scale: title and value above, an amber slider below. */
     class SliderRow(
@@ -452,5 +442,69 @@ class FlowLayout(c: Context, private val gapX: Int, private val gapY: Int) : Vie
             x += child.measuredWidth + gapX
             lineHeight = maxOf(lineHeight, child.measuredHeight)
         }
+    }
+}
+
+/**
+ * Equal cells in even rows: each child is given the same width and [cellHeight], spread edge to
+ * edge with [gap] between them. With a fixed width it fills it, choosing the fewest rows whose cells
+ * stay wide enough; given room to spare, it takes only what its widest label needs.
+ */
+@SuppressLint("ViewConstructor") // made in code only
+class ChipGrid(c: Context, private val gap: Int, private val cellHeight: Int) : ViewGroup(c) {
+    private val minCell = (56 * c.resources.displayMetrics.density).toInt()
+    private var cols = 1
+    private var cellWidth = 0
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val kids = (0 until childCount).map { getChildAt(it) }.filter { !it.isGone }
+        val n = kids.size
+        if (n == 0) {
+            setMeasuredDimension(0, 0)
+            return
+        }
+        val mode = MeasureSpec.getMode(widthMeasureSpec)
+        val size = MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
+        val natural = kids.maxOf {
+            it.measure(MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED), MeasureSpec.makeMeasureSpec(cellHeight, MeasureSpec.EXACTLY))
+            it.measuredWidth
+        }
+        var width: Int
+        if (mode == MeasureSpec.EXACTLY || (mode == MeasureSpec.AT_MOST && natural * n + gap * (n - 1) > size)) {
+            width = size
+            cols = n
+            for (rows in 1..n) {
+                val c = (n + rows - 1) / rows
+                if (c <= MAX_COLUMNS && (width - gap * (c - 1)) / c >= minCell) {
+                    cols = c
+                    break
+                }
+                cols = 1
+            }
+            cellWidth = (width - gap * (cols - 1)) / cols
+        } else {
+            cols = n
+            cellWidth = natural
+            width = natural * n + gap * (n - 1)
+        }
+        val rows = (n + cols - 1) / cols
+        kids.forEach { it.measure(MeasureSpec.makeMeasureSpec(cellWidth, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(cellHeight, MeasureSpec.EXACTLY)) }
+        setMeasuredDimension(width + paddingLeft + paddingRight, rows * cellHeight + (rows - 1) * gap + paddingTop + paddingBottom)
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        var i = 0
+        for (k in 0 until childCount) {
+            val child = getChildAt(k)
+            if (child.isGone) continue
+            val x = paddingLeft + (i % cols) * (cellWidth + gap)
+            val y = paddingTop + (i / cols) * (cellHeight + gap)
+            child.layout(x, y, x + cellWidth, y + cellHeight)
+            i++
+        }
+    }
+
+    private companion object {
+        const val MAX_COLUMNS = 5
     }
 }
