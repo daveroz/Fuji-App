@@ -21,7 +21,6 @@ class ConnectScreen(private val a: MainActivity) {
     private val c = a
     private val status = Kit.text(c, null, 15f, Deco.TEXT_SOFT)
     private val progress = Kit.progress(c)
-    private val art = CameraView(c, lit = false)
     private val find = Kit.button(c, "Find camera", icon = LineIcon.Kind.BLUETOOTH) { a.onFindPressed() }
     private val pairedTitle = Kit.sectionTitle(c, "Paired cameras")
     private val paired = Kit.column(c)
@@ -29,8 +28,7 @@ class ConnectScreen(private val a: MainActivity) {
     private val found = Kit.column(c)
 
     val view: View = Kit.page(c, Kit.column(c).apply {
-        addView(Layouts.hero(c).apply { addView(art, Kit.lp()) }, Kit.lp(top = Deco.dpi(c, 4)))
-        addView(Kit.label(c, "Bluetooth", Deco.DIM), Kit.lp(top = Deco.dpi(c, 18)))
+        addView(Kit.label(c, "Bluetooth", Deco.AMBER_LIGHT, 10f), Kit.lp(top = Deco.dpi(c, 8)))
         addView(Kit.text(c, "Connect your camera", 30f), Kit.lp(top = Deco.dpi(c, 12)))
         addView(
             Kit.text(
@@ -52,7 +50,6 @@ class ConnectScreen(private val a: MainActivity) {
     })
 
     fun render(state: ConnState) {
-        art.refresh()
         val busy = state is ConnState.Connecting || (state is ConnState.Scanning && state.active)
         progress.visibility = if (busy) View.VISIBLE else View.GONE
         status.text = when (state) {
@@ -99,7 +96,7 @@ class ConnectScreen(private val a: MainActivity) {
     }
 
     private fun cameraRow(title: String, subtitle: String, onClick: () -> Unit): View = Kit.row(c).apply {
-        background = Deco.glassPressable(c, 16f)
+        background = Deco.glassPressable(c, 13f)
         setPadding(Deco.dpi(c, 18), Deco.dpi(c, 16), Deco.dpi(c, 14), Deco.dpi(c, 16))
         addView(Kit.iconSquare(c, LineIcon.Kind.SHOTS))
         addView(Kit.column(c).apply {
@@ -116,7 +113,6 @@ class ConnectScreen(private val a: MainActivity) {
 /** Everything the connected camera reports, live, plus the remote release. */
 class StatusScreen(private val a: MainActivity) {
     private val c = a
-    private val art = CameraView(c)
     private val strip = FrameLayout(c)
     private val sections = Kit.column(c)
     private val remoteCard = Kit.column(c)
@@ -128,8 +124,7 @@ class StatusScreen(private val a: MainActivity) {
     // icons, then the two things to do with it as panels with an arrow.
     val view: View = Kit.page(c, Kit.column(c).apply {
         addView(Layouts.hero(c).apply {
-            addView(art, Kit.lp())
-            addView(heroTitle, Kit.lp(top = Deco.dpi(c, 12)))
+            addView(heroTitle)
             addView(heroDetail, Kit.lp(top = Deco.dpi(c, 6)))
             addView(Kit.hairline(c), Kit.lp(top = Deco.dpi(c, 14)))
             addView(strip, Kit.lp(top = Deco.dpi(c, 14)))
@@ -162,7 +157,6 @@ class StatusScreen(private val a: MainActivity) {
     private var shown: Pair<ConnState.Connected, VitalsState>? = null
 
     fun render(state: ConnState.Connected, vitals: VitalsState) {
-        art.refresh()
         // Render runs on every change anywhere in the app (transfer progress too); only rebuild
         // when the camera has told us something new.
         if (shown == (state to vitals)) return
@@ -196,7 +190,7 @@ class StatusScreen(private val a: MainActivity) {
 
     /** A card to go somewhere: its icon glowing, the name, what it's for. */
     private fun tile(title: String, detail: String, icon: LineIcon.Kind, tone: GlassDrawable.Tone, onClick: () -> Unit): View = Kit.column(c).apply {
-        background = Deco.glassPressable(c, 16f, tone)
+        background = Deco.glassPressable(c, 13f, tone)
         setPadding(Deco.dpi(c, 16), Deco.dpi(c, 16), Deco.dpi(c, 16), Deco.dpi(c, 16))
         addView(LineIcon(c, icon, Deco.AMBER_LIGHT), LinearLayout.LayoutParams(Deco.dpi(c, 26), Deco.dpi(c, 26)))
         addView(Kit.text(c, title, 16f, Deco.TEXT), Kit.lp(top = Deco.dpi(c, 14)))

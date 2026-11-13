@@ -26,11 +26,11 @@ or redistributed.**
 
 | Tab | What's on it |
 |---|---|
-| **Camera** | Before connecting: find and pair a camera, or reconnect to a paired one. Connected, laid out like Hasselblad's app: the camera (a drawing, or your own photo of it, set in Settings) in a dark panel with its name set wide and a row of spec icons (shots, power, Wi-Fi, firmware), then the **Photos** and **Remote** tiles (Wi-Fi, see below), a readout strip (shots, power, Wi-Fi, firmware), the **remote release** (hold to focus, let go to shoot), and every value the camera reports, decoded and kept live. **State:** power switch, Wi-Fi access point, pictures waiting, why it's busy, card, firmware update. **Camera:** model, name, serial, firmware, model code. **Connection:** paired phones, connect while off, location sync and interval, transfer settings, activity log. **Lens**, and **Technical** details. |
+| **Camera** | Before connecting: find and pair a camera, or reconnect to a paired one. Connected, laid out like Hasselblad's app: a glass panel with the camera's name set wide and a row of spec icons (shots, power, Wi-Fi, firmware), then the **Photos** and **Remote** tiles (Wi-Fi, see below), a readout strip (shots, power, Wi-Fi, firmware), the **remote release** (hold to focus, let go to shoot), and every value the camera reports, decoded and kept live. **State:** power switch, Wi-Fi access point, pictures waiting, why it's busy, card, firmware update. **Camera:** model, name, serial, firmware, model code. **Connection:** paired phones, connect while off, location sync and interval, transfer settings, activity log. **Lens**, and **Technical** details. |
 | **Recipes** | Three sections. **Camera**: the C1–C7 names, read over Bluetooth from the camera's settings file when you open it (about 2 seconds; offline, the newest backup stands in), and, over USB, every setting of every slot. **Library**: 30 recipes after popular film stocks (Portra, Ektar, Gold, Kodachrome, Superia, Pro 400H, Velvia, CineStill, Tri-X, HP5…) and films (Blade Runner 2049, Skyfall, The Matrix, Fury Road, Drive, Amélie, In the Mood for Love, Dune…), each with what the look is, how the settings get there, and how to shoot it. **Lab**: the preview stays on screen while the settings, in five tabs (Film, Color, Light, Tone, Detail), change it; film simulations are a scrolling strip of thumbnails of your picture, each in its look (like a phone camera's filter row), and grain and the effects are one-tap chips; **Library** starts from any recipe; the sample is a color chart (the 24 color-checker patches, eight skin tones, a grey ramp) or one of your photos, and a **vectorscope** in the manner of DaVinci Resolve's shows where every color lands, with the **skin-tone line** to check skin against; save the result to My recipes. Any recipe can be loaded into a slot. |
 | **Equipment** | Total shots, shutter actuations against the rated shutter life, and all of the camera's usage counters: power-ons, operating, shooting and viewfinder time, viewfinder switches, flash, half-presses, OK and command-dial use, sensor cleanings, heat warnings and shutdowns, time spent with the sensor hot, battery, USB and lens counts. |
 | **Backups** | Back up the camera's settings file, restore it to the same model, share it, delete it, or **import** a backup file (one shared from this app, or the camera's own file). Each backup is a ticket-style card: camera, firmware and date as labelled fields, the recipes inside below a tear line. |
-| **Settings** | **Set the camera clock** (on by default, as XApp does). **Camera picture**: the app's drawing, or a photo of your camera. The camera's **Location sync** (see below), **location interval** and **Connect while power off** settings, written straight to the camera. **Log**: save, share, clear. |
+| **Settings** | **Set the camera clock** (on by default, as XApp does). The camera's **Location sync** (see below), **location interval** and **Connect while power off** settings, written straight to the camera. **Log**: save, share, clear. |
 
 The **LOG** button at the top of every screen saves the app's recording as a `.txt` file in
 **Downloads** (on Android 9 and lower you pick where). The recording runs all the time and
@@ -147,22 +147,25 @@ says so once and suggests turning Location sync off.
 
 ### Layout
 
-**Glass, kept quiet**: cards are charcoal glass that lets a little of the stage through, a touch
-lighter at the top left, deeper at the bottom, with film grain and a hairline rim that's brightest
-at the corners that catch the light. The glass also picks up the stage's own light behind it
-(the moving key light and ceiling lamps), faintly, and its rim warms where the key light falls.
-Corners are **squircles**, continuous curves as iOS draws them (Figma's 60% corner smoothing),
-not circular arcs. Small actions are round glass **bubbles**; the key action of a screen is a
-solid amber pill; on/off settings are switches; choices are glass capsules, and a segmented capsule
-switches sections (Camera / Library / Lab, the Lab's five groups).
+**Glass, kept quiet and a little solid**: cards are charcoal glass that only just lets the stage
+through, a touch lighter at the top left, deeper at the bottom, with fine grain and a hairline
+rim that's brightest at the corners that catch the light. The glass picks up the stage's own light
+behind it (the moving key light and ceiling lamps), faintly, and its rim warms a little where the
+key light falls.
 
-The **tab bar floats**: a capsule of denser glass over the page, with the chosen tab in a lighter
-lens. Status lights are small lamps with a glow, the remote's exposure scale is a row of thin
-marks with the value lit, Equipment shows the shutter's actuations as a **ring of 60 lamps** lit to
-the share of its rated life, and backups are dated tickets with their recipes as chips. The
-icon set (thin round-capped lines, drawn in code) runs through the tab bar, buttons, tiles and
-settings rows. While the camera is on Wi-Fi, the header still names it and says how it's reached
-("Remote · Wi-Fi").
+**Everything is a squircle**: continuous corners as iOS draws them (Figma's 60% corner
+smoothing), not circular arcs, kept tight: cards 13 dp, tiles 11, buttons, chips and the switch 12,
+the tab bar 20. Small actions are small squares of glass with full squircle corners; the key action
+of a screen is solid amber; on/off settings are switches; a segmented control switches sections
+(Camera / Library / Lab, the Lab's five groups), the chosen one a lighter pane. Only the shutter
+(a camera's round button) and the status lamps are round.
+
+The **tab bar floats** over the page, the chosen tab a lighter pane. Status lights are small lamps
+with a glow, the remote's exposure scale is a row of thin marks with the value lit, Equipment shows
+the shutter's actuations as a **ring of 60 lamps** lit to the share of its rated life, and backups
+are dated tickets with their recipes as chips. **Icons are solid**: filled shapes with their
+details cut out, drawn in code, through the tab bar, buttons, tiles and settings rows. While the
+camera is on Wi-Fi, the header still names it and says how it's reached ("Remote · Wi-Fi").
 
 ### Look
 

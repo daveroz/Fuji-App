@@ -23,11 +23,11 @@ import com.fujiapp.remote.model.CameraInfo
 object Kit {
 
     const val PAGE_MARGIN = 20
-    private const val PANEL_RADIUS = 16f
+    private const val PANEL_RADIUS = 13f
     /** Room at the foot of a page for the floating tab bar (70 dp and its margin, and a little air). */
     const val TAB_SPACE = 104
     /** Buttons are pills, like the references' big rounded actions. */
-    private const val BUTTON_RADIUS = 26f
+    private const val BUTTON_RADIUS = 12f
 
     val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
     val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -179,7 +179,7 @@ object Kit {
     fun iconSquare(c: Context, icon: LineIcon.Kind): View = LineIcon(c, icon, Deco.AMBER_LIGHT).apply {
         val pad = Deco.dpi(c, 8)
         setPadding(pad, pad, pad, pad)
-        background = Deco.glass(c, 9f, GlassDrawable.Tone.LENS)
+        background = Deco.glass(c, 8f, GlassDrawable.Tone.LENS)
         layoutParams = LinearLayout.LayoutParams(Deco.dpi(c, 34), Deco.dpi(c, 34)).apply { marginEnd = Deco.dpi(c, 14) }
     }
 
@@ -233,7 +233,7 @@ object Kit {
             }
         }
         val view: View = row(c).apply {
-            background = Deco.glass(c, -1f, GlassDrawable.Tone.WELL)
+            background = Deco.glass(c, 12f, GlassDrawable.Tone.WELL)
             val pad = Deco.dpi(c, 4)
             setPadding(pad, pad, pad, pad)
             items.forEach { addView(it, lp(0, weight = 1f)) }
@@ -283,7 +283,7 @@ object Kit {
             chips.forEachIndexed { i, chip ->
                 val on = i == index
                 chip.setTextColor(if (on) Deco.AMBER_LIGHT else Deco.MUTED)
-                chip.background = if (on) Deco.lit(ctx, 19f) else Deco.glass(ctx, -1f)
+                chip.background = if (on) Deco.lit(ctx, 10f) else Deco.glass(ctx, 10f)
                 chip.setPadding(inset + Deco.dpi(ctx, 10), inset, inset + Deco.dpi(ctx, 10), inset)
             }
         }
@@ -316,6 +316,8 @@ object Kit {
             trackInactiveTintList = ColorStateList.valueOf(Deco.BORDER_STRONG)
             thumbTintList = ColorStateList.valueOf(Deco.AMBER_LIGHT)
             haloTintList = ColorStateList.valueOf(Deco.KEY_GLASS_HI)
+            // A squircle thumb, like every other shape.
+            setCustomThumbDrawable(SquircleDrawable(0xFFF6E3CB.toInt(), 0, 0f, Deco.dp(c, 5.5f)))
             addOnChangeListener { _, v, fromUser ->
                 valueText.text = format(v)
                 if (fromUser) onChange(v)

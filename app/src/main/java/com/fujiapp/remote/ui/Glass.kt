@@ -23,6 +23,7 @@ import android.graphics.drawable.Drawable
 import android.view.View
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.get
+import androidx.core.graphics.withClip
 import java.util.Collections
 import java.util.WeakHashMap
 import kotlin.math.cos
@@ -119,12 +120,12 @@ class GlassDrawable(
     private val depth = Paint(Paint.ANTI_ALIAS_FLAG)
     private val grain = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         shader = BitmapShader(Stagelight.grain, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
-        alpha = 120
+        alpha = 80
     }
     private val light = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
         colorFilter = LIGHT_FILTER
-        alpha = if (tone == Tone.BAR) 120 else 200
+        alpha = if (tone == Tone.BAR) 80 else 130
     }
     private val key = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x2EEB9438 }
     private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -150,21 +151,22 @@ class GlassDrawable(
         val h = rect.height()
         val w = rect.width()
         // Charcoal, barely cool: lighter at the top left, deepest at the bottom right.
+        // A little more solid than glass usually is: the stage only just shows through.
         val (top, mid, bottom) = when (tone) {
-            Tone.LENS -> Triple(0x2EFFFFFF, 0x1AFFFFFF, 0x14FFFFFF)
-            Tone.WELL -> Triple(0x8C000000.toInt(), 0x73000000, 0x66000000)
-            Tone.BAR -> Triple(0xE61B1C20.toInt(), 0xEB111215.toInt(), 0xF00C0D10.toInt())
-            else -> Triple(0xC71B1C20.toInt(), 0xD1111216.toInt(), 0xDB0C0D10.toInt())
+            Tone.LENS -> Triple(0x29FFFFFF, 0x21FFFFFF, 0x1CFFFFFF)
+            Tone.WELL -> Triple(0x99000000.toInt(), 0x8C000000.toInt(), 0x85000000.toInt())
+            Tone.BAR -> Triple(0xF0191A1E.toInt(), 0xF2131417.toInt(), 0xF50F1013.toInt())
+            else -> Triple(0xDE191A1E.toInt(), 0xE3131417.toInt(), 0xEB0F1013.toInt())
         }
         fill.shader = if (round) {
-            RadialGradient(rect.centerX(), rect.top, h * 0.95f, intArrayOf(0xF01C1D21.toInt(), 0xF0101114.toInt(), 0xF20B0C0E.toInt()), floatArrayOf(0f, 0.6f, 1f), Shader.TileMode.CLAMP)
+            LinearGradient(rect.left, rect.top, rect.left, rect.bottom, intArrayOf(0xF21B1C20.toInt(), 0xF5121316.toInt()), null, Shader.TileMode.CLAMP)
         } else {
             LinearGradient(rect.left, rect.top, rect.left + w * 0.35f, rect.bottom, intArrayOf(top, mid, bottom), floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP)
         }
         // The key light, faintly, in one corner: top right for panes, under a lens.
         val glow = when (tone) {
-            Tone.WARM -> 0x1FEB9438
-            Tone.LENS -> 0x1AEB9438
+            Tone.WARM -> 0x14EB9438
+            Tone.LENS -> 0x0FEB9438
             else -> 0
         }
         warmth.shader = when {
@@ -173,23 +175,23 @@ class GlassDrawable(
             else -> RadialGradient(rect.right, rect.top, max(w * 0.9f, h * 0.8f), glow, 0, Shader.TileMode.CLAMP)
         }
         sheen.shader = if (tone == Tone.WELL) null else
-            RadialGradient(rect.left + w * 0.15f, rect.top, max(w, h) * 0.75f, if (tone == Tone.LENS) 0x14FFFFFF else 0x0DFFFFFF, 0, Shader.TileMode.CLAMP)
+            RadialGradient(rect.left + w * 0.15f, rect.top, max(w, h) * 0.75f, if (tone == Tone.LENS) 0x0DFFFFFF else 0x08FFFFFF, 0, Shader.TileMode.CLAMP)
         depth.shader = if (tone == Tone.WELL) {
             LinearGradient(0f, rect.top, 0f, rect.top + min(h, 14 * density), 0x66000000, 0, Shader.TileMode.CLAMP)
         } else {
-            LinearGradient(0f, rect.bottom - min(h * 0.4f, 36 * density), 0f, rect.bottom, 0, 0x33000000, Shader.TileMode.CLAMP)
+            LinearGradient(0f, rect.bottom - min(h * 0.4f, 36 * density), 0f, rect.bottom, 0, 0x1F000000, Shader.TileMode.CLAMP)
         }
         rimWarmth = -1f
     }
 
-    /** The shape: a circle, a capsule or a squircle. */
+    /** The shape: always a squircle (a "round" button is a squircle with a fuller corner). */
     private fun outline(path: android.graphics.Path, r: RectF, inset: Float) {
-        path.reset()
-        when {
-            round -> path.addOval(r, android.graphics.Path.Direction.CW)
-            radius < 0 -> path.addRoundRect(r, r.height() / 2, r.height() / 2, android.graphics.Path.Direction.CW)
-            else -> squirclePath(path, r, max(0f, radius - inset))
+        val corner = when {
+            round -> min(r.width(), r.height()) * ROUND_SHARE
+            radius < 0 -> CONTROL_RADIUS_DP * density
+            else -> radius
         }
+        squirclePath(path, r, max(0f, corner - inset))
     }
 
     override fun draw(canvas: Canvas) {
@@ -211,7 +213,7 @@ class GlassDrawable(
             lightShader?.setLocalMatrix(lightMatrix)
             light.shader = lightShader
             canvas.drawPath(shape, light)
-            warm = (2.5f * Stagelight.at(loc[0] + rect.right - 12 * density, loc[1] + rect.top + 12 * density)).coerceIn(0f, 0.35f)
+            warm = (2f * Stagelight.at(loc[0] + rect.right - 12 * density, loc[1] + rect.top + 12 * density)).coerceIn(0f, 0.25f)
         }
         if (pressed) canvas.drawPath(shape, key)
         sheen.shader?.let { canvas.drawPath(shape, sheen) }
@@ -230,12 +232,12 @@ class GlassDrawable(
      * edge; where the key light falls on it (top right), it takes a little of its warmth.
      */
     private fun rimShader(warm: Float): Shader {
-        val strong = if (tone == Tone.WELL) 0x14 else if (round) 0x40 else 0x42
-        val soft = if (tone == Tone.WELL) 0x0A else if (round) 0x26 else 0x1C
+        val strong = if (tone == Tone.WELL) 0x12 else if (round) 0x33 else 0x36
+        val soft = if (tone == Tone.WELL) 0x0A else if (round) 0x21 else 0x1A
         val edge = (strong shl 24) or 0xFFFFFF
         val faint = (soft shl 24) or 0xFFFFFF
         val corner = if (warm > 0.01f) {
-            val a = (soft + (0x60 - soft) * warm / 0.6f).roundToInt().coerceIn(0, 255)
+            val a = (soft + (0x48 - soft) * warm / 0.6f).roundToInt().coerceIn(0, 255)
             (a shl 24) or 0xFFD2A6
         } else faint
         val mid = (((strong + soft) / 2) shl 24) or 0xFFFFFF
@@ -253,9 +255,14 @@ class GlassDrawable(
     @Deprecated("Deprecated in Java")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 
-    private companion object {
+    companion object {
+        /** A control's corner (buttons, chips, the switch), in dp. */
+        const val CONTROL_RADIUS_DP = 12f
+        /** A "round" button's corner, as a share of its size: a squircle, not a circle. */
+        const val ROUND_SHARE = 0.27f
+
         /** The light, about as bright in the glass as around it, a little richer. */
-        val LIGHT_FILTER = ColorMatrixColorFilter(ColorMatrix().apply {
+        private val LIGHT_FILTER = ColorMatrixColorFilter(ColorMatrix().apply {
             setSaturation(1.2f)
             postConcat(ColorMatrix(floatArrayOf(1f, 0f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 0f, 1.3f, 0f)))
         })
@@ -263,11 +270,12 @@ class GlassDrawable(
 }
 
 /**
- * The key action: a solid amber pill lit from above, with the light glowing around it (drawn once
- * per size into a picture, inside an inset that leaves room for the glow).
+ * The key action: solid amber, a squircle, with a soft glow around it (drawn once per size into a
+ * picture, inside an inset that leaves room for the glow).
  */
 class KeyDrawable(context: Context, private val radius: Float, private val pressed: Boolean = false) : Drawable() {
-    private val inset = 4 * context.resources.displayMetrics.density
+    private val density = context.resources.displayMetrics.density
+    private val inset = 4 * density
     private var picture: Bitmap? = null
 
     override fun onBoundsChange(bounds: Rect) {
@@ -280,26 +288,16 @@ class KeyDrawable(context: Context, private val radius: Float, private val press
         val pic = picture ?: createBitmap(b.width(), b.height()).also { bmp ->
             val c = Canvas(bmp)
             val r = RectF(inset, inset, b.width() - inset, b.height() - inset)
-            val rad = if (radius < 0) r.height() / 2 else radius
-            c.drawRoundRect(r, rad, rad, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = if (pressed) 0x99EB9438.toInt() else 0x66EB9438
-                maskFilter = BlurMaskFilter(inset * 1.2f, BlurMaskFilter.Blur.OUTER)
+            val rad = if (radius < 0) GlassDrawable.CONTROL_RADIUS_DP * density else radius
+            val path = android.graphics.Path().also { squirclePath(it, r, rad) }
+            c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = if (pressed) 0x80EB9438.toInt() else 0x47EB9438
+                maskFilter = BlurMaskFilter(inset, BlurMaskFilter.Blur.OUTER)
             })
-            val top = if (pressed) 0xFFF0A65A.toInt() else 0xFFF6B472.toInt()
-            c.drawRoundRect(r, rad, rad, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                shader = LinearGradient(0f, r.top, 0f, r.bottom, intArrayOf(top, Deco.AMBER, Deco.AMBER_DEEP), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
+            val top = if (pressed) 0xFFE99A4C.toInt() else 0xFFF2A65C.toInt()
+            c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(0f, r.top, 0f, r.bottom, top, if (pressed) Deco.AMBER_DEEP else 0xFFDB862F.toInt(), Shader.TileMode.CLAMP)
             })
-            // Light along the top edge, as on a pill of glass.
-            c.drawRoundRect(r, rad, rad, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                shader = LinearGradient(0f, r.top, 0f, r.top + r.height() * 0.45f, 0x59FFF4E6, 0, Shader.TileMode.CLAMP)
-            })
-            val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.STROKE
-                strokeWidth = inset * 0.25f
-                shader = LinearGradient(0f, r.top, 0f, r.bottom, 0x99FFF0DC.toInt(), 0x00FFF0DC, Shader.TileMode.CLAMP)
-            }
-            val h = line.strokeWidth / 2
-            c.drawRoundRect(RectF(r.left + h, r.top + h, r.right - h, r.bottom - h), rad - h, rad - h, line)
             picture = bmp
         }
         canvas.drawBitmap(pic, b.left.toFloat(), b.top.toFloat(), null)
@@ -440,21 +438,26 @@ class GlassSwitch(c: Context) : View(c) {
         val ky = r.centerY()
         knobOn = RadialGradient(r.right - rad, ky - kr * 0.6f, kr * 1.8f, intArrayOf(0xFFFFF8EF.toInt(), 0xFFF0D2AE.toInt()), null, Shader.TileMode.CLAMP)
         knobOff = RadialGradient(r.left + rad, ky - kr * 0.6f, kr * 1.8f, intArrayOf(0xFF4E5157.toInt(), 0xFF1E1F23.toInt()), null, Shader.TileMode.CLAMP)
-        glow.color = 0x80EB9438.toInt()
-        glow.maskFilter = BlurMaskFilter(6 * d, BlurMaskFilter.Blur.NORMAL)
+        glow.color = 0x66EB9438
+        glow.maskFilter = BlurMaskFilter(5 * d, BlurMaskFilter.Blur.NORMAL)
         on.shader = onShader
+        squirclePath(trackPath, r, GlassDrawable.CONTROL_RADIUS_DP * d)
+        val k = RectF(r.right - rad - kr, ky - kr, r.right - rad + kr, ky + kr)
+        squirclePath(knobOnPath, k, kr * 2 * GlassDrawable.ROUND_SHARE)
+        k.offsetTo(r.left + rad - kr, ky - kr)
+        squirclePath(knobOffPath, k, kr * 2 * GlassDrawable.ROUND_SHARE)
     }
 
+    private val trackPath = android.graphics.Path()
+    private val knobOnPath = android.graphics.Path()
+    private val knobOffPath = android.graphics.Path()
+
     override fun onDraw(canvas: Canvas) {
-        val rad = r.height() / 2
         well.draw(canvas)
-        if (checked) canvas.drawRoundRect(r, rad, rad, on)
-        val kr = rad - 3 * d
-        val kx = if (checked) r.right - rad else r.left + rad
-        val ky = r.centerY()
-        if (checked) canvas.drawCircle(kx, ky, kr, glow)
+        if (checked) canvas.drawPath(trackPath, on)
+        if (checked) canvas.drawPath(knobOnPath, glow)
         knob.shader = if (checked) knobOn else knobOff
-        canvas.drawCircle(kx, ky, kr, knob)
+        canvas.drawPath(if (checked) knobOnPath else knobOffPath, knob)
     }
 }
 
@@ -516,34 +519,9 @@ class LedRing(c: Context) : View(c) {
     }
 }
 
-/** A small amber light under a chosen segment's name, glowing a little into the glass. */
-class UnderLight(context: Context) : Drawable() {
-    private val d = context.resources.displayMetrics.density
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val r = RectF()
-
-    override fun draw(canvas: Canvas) {
-        val b = bounds
-        val cx = b.exactCenterX()
-        val y = b.bottom - 7 * d
-        p.color = 0x40EB9438
-        r.set(cx - 12 * d, y - 2.5f * d, cx + 12 * d, y + 2.5f * d)
-        canvas.drawRoundRect(r, r.height() / 2, r.height() / 2, p)
-        p.color = Deco.AMBER_LIGHT
-        r.set(cx - 7 * d, y - d, cx + 7 * d, y + d)
-        canvas.drawRoundRect(r, d, d, p)
-    }
-
-    override fun setAlpha(alpha: Int) = Unit
-    override fun setColorFilter(colorFilter: ColorFilter?) = Unit
-    @Deprecated("Deprecated in Java")
-    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
-}
-
-/** The chosen segment of a [Kit.Segmented]: a lighter lens of glass with its amber light. */
+/** The chosen segment of a [Kit.Segmented]: a lighter lens of glass, nothing under its name. */
 @Suppress("FunctionName") // reads as the drawable it makes
-fun SegmentLens(c: Context): Drawable =
-    android.graphics.drawable.LayerDrawable(arrayOf(GlassDrawable(c, -1f, tone = GlassDrawable.Tone.LENS), UnderLight(c)))
+fun SegmentLens(c: Context): Drawable = GlassDrawable(c, 9f * c.resources.displayMetrics.density, tone = GlassDrawable.Tone.LENS)
 
 /**
  * A rounded rectangle with continuous ("squircle") corners, as iOS draws them: each corner eases
@@ -592,4 +570,60 @@ fun squirclePath(path: android.graphics.Path, r: RectF, radius: Float, smoothing
     corner(r.left, r.bottom, 2, false)
     corner(r.left, r.top, 3, false)
     path.close()
+}
+
+/** A plain squircle: a fill and an optional hairline (Deco.box), for small solid shapes. */
+class SquircleDrawable(private val fill: Int, private val stroke: Int, private val strokeWidth: Float, private val radius: Float) : Drawable() {
+    private val path = android.graphics.Path()
+    private val edge = android.graphics.Path()
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    override fun onBoundsChange(bounds: Rect) {
+        val r = RectF(bounds)
+        squirclePath(path, r, radius)
+        val h = strokeWidth / 2
+        squirclePath(edge, RectF(r.left + h, r.top + h, r.right - h, r.bottom - h), max(0f, radius - h))
+    }
+
+    override fun draw(canvas: Canvas) {
+        if (fill ushr 24 != 0) {
+            p.style = Paint.Style.FILL
+            p.color = fill
+            canvas.drawPath(path, p)
+        }
+        if (stroke ushr 24 != 0 && strokeWidth > 0f) {
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = strokeWidth
+            p.color = stroke
+            canvas.drawPath(edge, p)
+        }
+    }
+
+    override fun setAlpha(alpha: Int) = Unit
+    override fun setColorFilter(colorFilter: ColorFilter?) = Unit
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+}
+
+/** A frame whose children are clipped to a squircle, on a ground colour (pictures set into glass). */
+@SuppressLint("ViewConstructor") // made in code only
+class SquircleFrame(c: Context, private val radius: Float, ground: Int = 0xFF000000.toInt()) : android.widget.FrameLayout(c) {
+    private val clip = android.graphics.Path()
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ground }
+
+    init {
+        setWillNotDraw(false)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        squirclePath(clip, RectF(0f, 0f, w.toFloat(), h.toFloat()), radius)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        canvas.drawPath(clip, paint)
+    }
+
+    override fun dispatchDraw(canvas: Canvas) {
+        canvas.withClip(clip) { super.dispatchDraw(this) }
+    }
 }

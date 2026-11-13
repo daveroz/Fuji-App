@@ -11,6 +11,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.graphics.withTranslation
 import com.fujiapp.remote.ui.LineIcon.Kind
 
 /**
@@ -20,7 +21,7 @@ import com.fujiapp.remote.ui.LineIcon.Kind
  */
 object Layouts {
     /** Card corners, as in the references' rounded cards. */
-    const val CARD_RADIUS = 16f
+    const val CARD_RADIUS = 13f
 
     /** A glass card that frames a camera, a picture or a readout. */
     fun hero(c: Context): LinearLayout = Kit.column(c).apply {
@@ -71,7 +72,7 @@ object Layouts {
         }
         private val box = Kit.column(c).apply {
             gravity = Gravity.CENTER
-            background = Deco.glassPressable(c, 14f)
+            background = Deco.glassPressable(c, 11f)
             setPadding(Deco.dpi(c, 4), Deco.dpi(c, 8), Deco.dpi(c, 4), Deco.dpi(c, 6))
             addView(LineIcon(c, icon), LinearLayout.LayoutParams(Deco.dpi(c, 22), Deco.dpi(c, 22)))
             addView(valueText, Kit.lp(top = Deco.dpi(c, 4)))
@@ -167,8 +168,10 @@ object Layouts {
 }
 
 /**
- * The app's icon set: thin round-capped lines in one colour, drawn in code (no artwork), so they stay
- * crisp at any size and take any tint. Used as a view ([LineIcon]) or inside buttons ([IconDrawable]).
+ * The app's icon set, solid: filled shapes with their details cut out (a camera's lens, a film's
+ * sprocket holes), and bold round-capped strokes for the few glyphs that are lines by nature
+ * (chevrons, close, plus, check). One colour, drawn in code (no artwork), crisp at any size and
+ * taking any tint. Used as a view ([LineIcon]) or inside buttons ([IconDrawable]).
  */
 class IconDrawable(private val kind: LineIcon.Kind, color: Int, private val context: Context) : android.graphics.drawable.Drawable() {
     var lineColor: Int = color
@@ -177,299 +180,327 @@ class IconDrawable(private val kind: LineIcon.Kind, color: Int, private val cont
             invalidateSelf()
         }
 
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val solid = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val bold = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
-    private val r = RectF()
-    private val path = Path()
+    /** The filled part, holes cut out; and the bold strokes. Built when the size changes. */
+    private val shape = Path()
+    private val strokes = Path()
+    private var alphaValue = 255
+
+    override fun onBoundsChange(bounds: android.graphics.Rect) {
+        build(bounds.width().toFloat(), bounds.height().toFloat())
+    }
 
     override fun draw(canvas: Canvas) {
         val b = bounds
-        val w = b.width().toFloat()
-        val h = b.height().toFloat()
+        if (b.width() <= 0 || b.height() <= 0) return
+        solid.color = lineColor
+        solid.alpha = alphaValue
+        bold.color = lineColor
+        bold.alpha = alphaValue
+        canvas.withTranslation(b.left.toFloat(), b.top.toFloat()) {
+            drawPath(shape, solid)
+            drawPath(strokes, bold)
+        }
+    }
+
+    // ---- building, in units of the icon's size from its centre ----
+    private var s = 0f
+    private var ox = 0f
+    private var oy = 0f
+    private fun x(u: Float) = ox + u * s
+    private fun y(u: Float) = oy + u * s
+
+    private fun rr(l: Float, t: Float, r: Float, b: Float, rad: Float) = Path().apply {
+        addRoundRect(RectF(x(l), y(t), x(r), y(b)), rad * s, rad * s, Path.Direction.CW)
+    }
+
+    private fun circle(cx: Float, cy: Float, r: Float) = Path().apply { addCircle(x(cx), y(cy), r * s, Path.Direction.CW) }
+
+    private fun poly(vararg pts: Float) = Path().apply {
+        moveTo(x(pts[0]), y(pts[1]))
+        var i = 2
+        while (i < pts.size) {
+            lineTo(x(pts[i]), y(pts[i + 1]))
+            i += 2
+        }
+        close()
+    }
+
+    /** A bar of [w] from one point to another, as a filled shape (for slits cut into a disc). */
+    private fun bar(x0: Float, y0: Float, x1: Float, y1: Float, w: Float): Path {
+        val dx = x1 - x0
+        val dy = y1 - y0
+        val len = kotlin.math.sqrt(dx * dx + dy * dy).coerceAtLeast(1e-4f)
+        val nx = -dy / len * w / 2
+        val ny = dx / len * w / 2
+        return poly(x0 + nx, y0 + ny, x1 + nx, y1 + ny, x1 - nx, y1 - ny, x0 - nx, y0 - ny)
+    }
+
+    private fun add(p: Path) = shape.op(p, Path.Op.UNION)
+    private fun cut(p: Path) = shape.op(p, Path.Op.DIFFERENCE)
+    private fun line(x0: Float, y0: Float, x1: Float, y1: Float) {
+        strokes.moveTo(x(x0), y(y0))
+        strokes.lineTo(x(x1), y(y1))
+    }
+
+    private fun arc(cx: Float, cy: Float, r: Float, start: Float, sweep: Float) {
+        strokes.arcTo(RectF(x(cx - r), y(cy - r), x(cx + r), y(cy + r)), start, sweep, true)
+    }
+
+    private fun build(w: Float, h: Float) {
+        shape.reset()
+        strokes.reset()
         if (w <= 0f || h <= 0f) return
-        val s = minOf(w, h)
-        val cx = b.left + w / 2
-        val cy = b.top + h / 2
-        p.color = lineColor
-        p.alpha = alphaValue
-        // Chevrons on a bubble are the thumb's target: drawn a little bolder than the rest of the set.
-        p.strokeWidth = if (kind == Kind.CHEVRON_LEFT || kind == Kind.CHEVRON_RIGHT) maxOf(2f, s * 0.11f) else maxOf(1.5f, s * 0.07f)
-        p.style = Paint.Style.STROKE
+        s = minOf(w, h)
+        ox = w / 2
+        oy = h / 2
+        bold.strokeWidth = maxOf(2f, s * 0.12f)
         when (kind) {
             Kind.SHOTS -> {
-                r.set(cx - s * 0.42f, cy - s * 0.3f, cx + s * 0.42f, cy + s * 0.34f)
-                canvas.drawRoundRect(r, s * 0.08f, s * 0.08f, p)
-                canvas.drawCircle(cx, cy + s * 0.03f, s * 0.15f, p)
-                canvas.drawLine(cx - s * 0.18f, cy - s * 0.3f, cx - s * 0.1f, cy - s * 0.42f, p)
-                canvas.drawLine(cx - s * 0.1f, cy - s * 0.42f, cx + s * 0.1f, cy - s * 0.42f, p)
-                canvas.drawLine(cx + s * 0.1f, cy - s * 0.42f, cx + s * 0.18f, cy - s * 0.3f, p)
+                add(rr(-0.45f, -0.24f, 0.45f, 0.36f, 0.1f))
+                add(poly(-0.2f, -0.23f, -0.12f, -0.38f, 0.12f, -0.38f, 0.2f, -0.23f))
+                cut(circle(0f, 0.06f, 0.18f))
+                add(circle(0f, 0.06f, 0.09f))
             }
             Kind.POWER -> {
-                r.set(cx - s * 0.36f, cy - s * 0.32f, cx + s * 0.36f, cy + s * 0.4f)
-                canvas.drawArc(r, -60f, 300f, false, p)
-                canvas.drawLine(cx, cy - s * 0.44f, cx, cy, p)
+                bold.strokeWidth = maxOf(2f, s * 0.13f)
+                arc(0f, 0.04f, 0.36f, -55f, 290f)
+                line(0f, -0.44f, 0f, -0.02f)
             }
             Kind.WIFI -> {
-                for (k in 1..3) {
-                    val rad = s * 0.14f * k
-                    r.set(cx - rad, cy + s * 0.28f - rad, cx + rad, cy + s * 0.28f + rad)
-                    canvas.drawArc(r, -135f, 90f, false, p)
-                }
-                p.style = Paint.Style.FILL
-                canvas.drawCircle(cx, cy + s * 0.28f, s * 0.05f, p)
+                // A fan of three bands, the camera's Wi-Fi.
+                for (k in 1..2) arc(0f, 0.3f, 0.2f * k + 0.06f, -135f, 90f)
+                add(circle(0f, 0.3f, 0.09f))
             }
             Kind.CHIP -> {
-                r.set(cx - s * 0.26f, cy - s * 0.26f, cx + s * 0.26f, cy + s * 0.26f)
-                canvas.drawRect(r, p)
+                add(rr(-0.28f, -0.28f, 0.28f, 0.28f, 0.07f))
+                cut(rr(-0.11f, -0.11f, 0.11f, 0.11f, 0.03f))
+                bold.strokeWidth = maxOf(1.5f, s * 0.08f)
                 for (k in -1..1) {
-                    val o = k * s * 0.14f
-                    canvas.drawLine(cx + o, cy - s * 0.26f, cx + o, cy - s * 0.42f, p)
-                    canvas.drawLine(cx + o, cy + s * 0.26f, cx + o, cy + s * 0.42f, p)
-                    canvas.drawLine(cx - s * 0.26f, cy + o, cx - s * 0.42f, cy + o, p)
-                    canvas.drawLine(cx + s * 0.26f, cy + o, cx + s * 0.42f, cy + o, p)
+                    val o = k * 0.14f
+                    line(o, -0.3f, o, -0.44f); line(o, 0.3f, o, 0.44f)
+                    line(-0.3f, o, -0.44f, o); line(0.3f, o, 0.44f, o)
                 }
             }
             Kind.FILM -> {
-                r.set(cx - s * 0.3f, cy - s * 0.42f, cx + s * 0.3f, cy + s * 0.42f)
-                canvas.drawRect(r, p)
-                canvas.drawLine(cx - s * 0.16f, cy - s * 0.42f, cx - s * 0.16f, cy + s * 0.42f, p)
-                canvas.drawLine(cx + s * 0.16f, cy - s * 0.42f, cx + s * 0.16f, cy + s * 0.42f, p)
-                p.style = Paint.Style.FILL
+                add(rr(-0.32f, -0.44f, 0.32f, 0.44f, 0.06f))
+                cut(rr(-0.13f, -0.32f, 0.13f, 0.32f, 0.03f))
                 for (k in -2..2) {
-                    canvas.drawCircle(cx - s * 0.23f, cy + k * s * 0.16f, s * 0.03f, p)
-                    canvas.drawCircle(cx + s * 0.23f, cy + k * s * 0.16f, s * 0.03f, p)
+                    val c = k * 0.16f
+                    cut(rr(-0.27f, c - 0.04f, -0.19f, c + 0.04f, 0.015f))
+                    cut(rr(0.19f, c - 0.04f, 0.27f, c + 0.04f, 0.015f))
                 }
             }
             Kind.WB -> {
-                canvas.drawCircle(cx, cy, s * 0.16f, p)
+                add(circle(0f, 0f, 0.21f))
+                bold.strokeWidth = maxOf(1.8f, s * 0.1f)
                 for (k in 0 until 8) {
                     val a = Math.toRadians(k * 45.0)
-                    val x0 = cx + Math.cos(a).toFloat() * s * 0.27f
-                    val y0 = cy + Math.sin(a).toFloat() * s * 0.27f
-                    val x1 = cx + Math.cos(a).toFloat() * s * 0.42f
-                    val y1 = cy + Math.sin(a).toFloat() * s * 0.42f
-                    canvas.drawLine(x0, y0, x1, y1, p)
+                    val c = Math.cos(a).toFloat()
+                    val sn = Math.sin(a).toFloat()
+                    line(c * 0.32f, sn * 0.32f, c * 0.44f, sn * 0.44f)
                 }
             }
-            Kind.FLASH -> {
-                path.reset()
-                path.moveTo(cx + s * 0.08f, cy - s * 0.44f)
-                path.lineTo(cx - s * 0.2f, cy + s * 0.06f)
-                path.lineTo(cx + s * 0.02f, cy + s * 0.06f)
-                path.lineTo(cx - s * 0.08f, cy + s * 0.44f)
-                path.lineTo(cx + s * 0.22f, cy - s * 0.08f)
-                path.lineTo(cx, cy - s * 0.08f)
-                path.close()
-                canvas.drawPath(path, p)
-            }
+            Kind.FLASH -> add(poly(0.1f, -0.46f, -0.24f, 0.08f, 0f, 0.08f, -0.1f, 0.46f, 0.25f, -0.1f, 0.01f, -0.1f))
             Kind.TIMER -> {
-                canvas.drawCircle(cx, cy + s * 0.06f, s * 0.34f, p)
-                canvas.drawLine(cx, cy + s * 0.06f, cx, cy - s * 0.14f, p)
-                canvas.drawLine(cx, cy + s * 0.06f, cx + s * 0.14f, cy + s * 0.12f, p)
-                canvas.drawLine(cx - s * 0.1f, cy - s * 0.44f, cx + s * 0.1f, cy - s * 0.44f, p)
+                add(circle(0f, 0.07f, 0.37f))
+                cut(rr(-0.045f, -0.16f, 0.045f, 0.11f, 0.045f))
+                add(rr(-0.11f, -0.47f, 0.11f, -0.37f, 0.04f))
             }
             Kind.FOCUS -> {
-                val e = s * 0.4f
-                val l = s * 0.16f
+                bold.strokeWidth = maxOf(2f, s * 0.11f)
+                val e = 0.4f
+                val l = 0.16f
                 for ((dx, dy) in listOf(-1 to -1, 1 to -1, -1 to 1, 1 to 1)) {
-                    val x = cx + dx * e
-                    val y = cy + dy * e
-                    canvas.drawLine(x, y, x - dx * l, y, p)
-                    canvas.drawLine(x, y, x, y - dy * l, p)
+                    val px = dx * e
+                    val py = dy * e
+                    strokes.moveTo(x(px - dx * l), y(py))
+                    strokes.lineTo(x(px), y(py))
+                    strokes.lineTo(x(px), y(py - dy * l))
                 }
-                canvas.drawCircle(cx, cy, s * 0.05f, p)
+                add(circle(0f, 0f, 0.1f))
             }
             Kind.ISO -> {
-                r.set(cx - s * 0.42f, cy - s * 0.26f, cx + s * 0.42f, cy + s * 0.26f)
-                canvas.drawRoundRect(r, s * 0.06f, s * 0.06f, p)
-                p.style = Paint.Style.FILL
-                p.textSize = s * 0.3f
-                p.textAlign = Paint.Align.CENTER
-                p.typeface = Deco.bold(context)
-                canvas.drawText("ISO", cx, cy + s * 0.11f, p)
+                add(rr(-0.45f, -0.28f, 0.45f, 0.28f, 0.08f))
+                val text = Path()
+                val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    typeface = Deco.bold(context)
+                    textSize = s * 0.3f
+                    textAlign = Paint.Align.CENTER
+                }
+                tp.getTextPath("ISO", 0, 3, ox, oy + s * 0.105f, text)
+                cut(text)
             }
             Kind.BATTERY -> {
-                r.set(cx - s * 0.4f, cy - s * 0.2f, cx + s * 0.32f, cy + s * 0.2f)
-                canvas.drawRoundRect(r, s * 0.05f, s * 0.05f, p)
-                canvas.drawLine(cx + s * 0.4f, cy - s * 0.08f, cx + s * 0.4f, cy + s * 0.08f, p)
-            }
-            Kind.GAUGE -> {
-                r.set(cx - s * 0.4f, cy - s * 0.32f, cx + s * 0.4f, cy + s * 0.48f)
-                canvas.drawArc(r, 160f, 220f, false, p)
-                canvas.drawLine(cx, cy + s * 0.08f, cx + s * 0.2f, cy - s * 0.14f, p)
-                canvas.drawCircle(cx, cy + s * 0.08f, s * 0.05f, p)
-            }
-            Kind.ARCHIVE -> {
-                r.set(cx - s * 0.42f, cy - s * 0.36f, cx + s * 0.42f, cy - s * 0.12f)
-                canvas.drawRoundRect(r, s * 0.04f, s * 0.04f, p)
-                r.set(cx - s * 0.36f, cy - s * 0.12f, cx + s * 0.36f, cy + s * 0.4f)
-                canvas.drawRoundRect(r, s * 0.04f, s * 0.04f, p)
-                canvas.drawLine(cx - s * 0.12f, cy + s * 0.04f, cx + s * 0.12f, cy + s * 0.04f, p)
-            }
-            Kind.GEAR -> {
-                canvas.drawCircle(cx, cy, s * 0.14f, p)
-                canvas.drawCircle(cx, cy, s * 0.3f, p)
-                for (k in 0 until 8) {
-                    val a = Math.toRadians(k * 45.0)
-                    canvas.drawLine(
-                        cx + Math.cos(a).toFloat() * s * 0.3f, cy + Math.sin(a).toFloat() * s * 0.3f,
-                        cx + Math.cos(a).toFloat() * s * 0.42f, cy + Math.sin(a).toFloat() * s * 0.42f, p,
-                    )
-                }
-            }
-            Kind.CHEVRON_LEFT -> {
-                canvas.drawLine(cx + s * 0.12f, cy - s * 0.28f, cx - s * 0.16f, cy, p)
-                canvas.drawLine(cx - s * 0.16f, cy, cx + s * 0.12f, cy + s * 0.28f, p)
-            }
-            Kind.CHEVRON_RIGHT -> {
-                canvas.drawLine(cx - s * 0.12f, cy - s * 0.28f, cx + s * 0.16f, cy, p)
-                canvas.drawLine(cx + s * 0.16f, cy, cx - s * 0.12f, cy + s * 0.28f, p)
-            }
-            Kind.CLOSE -> {
-                canvas.drawLine(cx - s * 0.24f, cy - s * 0.24f, cx + s * 0.24f, cy + s * 0.24f, p)
-                canvas.drawLine(cx + s * 0.24f, cy - s * 0.24f, cx - s * 0.24f, cy + s * 0.24f, p)
-            }
-            Kind.PLUS -> {
-                canvas.drawLine(cx - s * 0.28f, cy, cx + s * 0.28f, cy, p)
-                canvas.drawLine(cx, cy - s * 0.28f, cx, cy + s * 0.28f, p)
-            }
-            Kind.MINUS -> canvas.drawLine(cx - s * 0.28f, cy, cx + s * 0.28f, cy, p)
-            Kind.CHECK -> {
-                canvas.drawLine(cx - s * 0.28f, cy + s * 0.02f, cx - s * 0.08f, cy + s * 0.22f, p)
-                canvas.drawLine(cx - s * 0.08f, cy + s * 0.22f, cx + s * 0.3f, cy - s * 0.22f, p)
-            }
-            Kind.REFRESH -> {
-                r.set(cx - s * 0.32f, cy - s * 0.32f, cx + s * 0.32f, cy + s * 0.32f)
-                canvas.drawArc(r, -60f, 300f, false, p)
-                val ax = cx + s * 0.16f
-                val ay = cy - s * 0.28f
-                canvas.drawLine(ax, ay, ax + s * 0.16f, ay - s * 0.06f, p)
-                canvas.drawLine(ax, ay, ax + s * 0.06f, ay + s * 0.15f, p)
-            }
-            Kind.SHARE -> {
-                canvas.drawLine(cx, cy + s * 0.1f, cx, cy - s * 0.4f, p)
-                canvas.drawLine(cx, cy - s * 0.4f, cx - s * 0.14f, cy - s * 0.26f, p)
-                canvas.drawLine(cx, cy - s * 0.4f, cx + s * 0.14f, cy - s * 0.26f, p)
-                path.reset()
-                path.moveTo(cx - s * 0.14f, cy - s * 0.12f)
-                path.lineTo(cx - s * 0.32f, cy - s * 0.12f)
-                path.lineTo(cx - s * 0.32f, cy + s * 0.4f)
-                path.lineTo(cx + s * 0.32f, cy + s * 0.4f)
-                path.lineTo(cx + s * 0.32f, cy - s * 0.12f)
-                path.lineTo(cx + s * 0.14f, cy - s * 0.12f)
-                canvas.drawPath(path, p)
-            }
-            Kind.TRASH -> {
-                canvas.drawLine(cx - s * 0.34f, cy - s * 0.26f, cx + s * 0.34f, cy - s * 0.26f, p)
-                canvas.drawLine(cx - s * 0.1f, cy - s * 0.4f, cx + s * 0.1f, cy - s * 0.4f, p)
-                path.reset()
-                path.moveTo(cx - s * 0.26f, cy - s * 0.26f)
-                path.lineTo(cx - s * 0.2f, cy + s * 0.4f)
-                path.lineTo(cx + s * 0.2f, cy + s * 0.4f)
-                path.lineTo(cx + s * 0.26f, cy - s * 0.26f)
-                canvas.drawPath(path, p)
-            }
-            Kind.DOWNLOAD, Kind.UPLOAD -> {
-                val down = kind == Kind.DOWNLOAD
-                val tip = if (down) cy + s * 0.14f else cy - s * 0.36f
-                val tail = if (down) cy - s * 0.36f else cy + s * 0.14f
-                canvas.drawLine(cx, tail, cx, tip, p)
-                val back = if (down) -s * 0.16f else s * 0.16f
-                canvas.drawLine(cx, tip, cx - s * 0.16f, tip + back, p)
-                canvas.drawLine(cx, tip, cx + s * 0.16f, tip + back, p)
-                canvas.drawLine(cx - s * 0.34f, cy + s * 0.38f, cx + s * 0.34f, cy + s * 0.38f, p)
-            }
-            Kind.APERTURE -> {
-                canvas.drawCircle(cx, cy, s * 0.4f, p)
-                for (k in 0 until 6) {
-                    val a = Math.toRadians(k * 60.0)
-                    val a2 = Math.toRadians(k * 60.0 + 100.0)
-                    canvas.drawLine(
-                        cx + Math.cos(a).toFloat() * s * 0.4f, cy + Math.sin(a).toFloat() * s * 0.4f,
-                        cx + Math.cos(a2).toFloat() * s * 0.16f, cy + Math.sin(a2).toFloat() * s * 0.16f, p,
-                    )
-                }
-            }
-            Kind.BLUETOOTH -> {
-                path.reset()
-                path.moveTo(cx - s * 0.2f, cy - s * 0.18f)
-                path.lineTo(cx + s * 0.18f, cy + s * 0.18f)
-                path.lineTo(cx, cy + s * 0.4f)
-                path.lineTo(cx, cy - s * 0.4f)
-                path.lineTo(cx + s * 0.18f, cy - s * 0.18f)
-                path.lineTo(cx - s * 0.2f, cy + s * 0.18f)
-                canvas.drawPath(path, p)
-            }
-            Kind.LOG -> {
-                r.set(cx - s * 0.3f, cy - s * 0.4f, cx + s * 0.3f, cy + s * 0.4f)
-                canvas.drawRoundRect(r, s * 0.06f, s * 0.06f, p)
-                for (k in -1..1) canvas.drawLine(cx - s * 0.16f, cy + k * s * 0.16f, cx + s * 0.16f, cy + k * s * 0.16f, p)
-            }
-            Kind.PIN -> {
-                canvas.drawCircle(cx, cy - s * 0.12f, s * 0.12f, p)
-                path.reset()
-                path.moveTo(cx, cy + s * 0.42f)
-                path.cubicTo(cx - s * 0.5f, cy - s * 0.05f, cx - s * 0.22f, cy - s * 0.45f, cx, cy - s * 0.42f)
-                path.cubicTo(cx + s * 0.22f, cy - s * 0.45f, cx + s * 0.5f, cy - s * 0.05f, cx, cy + s * 0.42f)
-                canvas.drawPath(path, p)
-            }
-            Kind.LAB -> {
-                path.reset()
-                path.moveTo(cx - s * 0.1f, cy - s * 0.4f)
-                path.lineTo(cx - s * 0.1f, cy - s * 0.08f)
-                path.lineTo(cx - s * 0.34f, cy + s * 0.36f)
-                path.lineTo(cx + s * 0.34f, cy + s * 0.36f)
-                path.lineTo(cx + s * 0.1f, cy - s * 0.08f)
-                path.lineTo(cx + s * 0.1f, cy - s * 0.4f)
-                canvas.drawPath(path, p)
-                canvas.drawLine(cx - s * 0.2f, cy + s * 0.16f, cx + s * 0.2f, cy + s * 0.16f, p)
-            }
-            Kind.LIBRARY -> {
-                for (k in 0..2) {
-                    val x = cx - s * 0.3f + k * s * 0.2f
-                    canvas.drawLine(x, cy - s * 0.36f, x, cy + s * 0.36f, p)
-                }
-                canvas.drawLine(cx + s * 0.16f, cy - s * 0.34f, cx + s * 0.36f, cy + s * 0.34f, p)
-            }
-            Kind.PHOTOS -> {
-                r.set(cx - s * 0.42f, cy - s * 0.32f, cx + s * 0.42f, cy + s * 0.32f)
-                canvas.drawRoundRect(r, s * 0.08f, s * 0.08f, p)
-                path.reset()
-                path.moveTo(cx - s * 0.42f, cy + s * 0.2f)
-                path.lineTo(cx - s * 0.16f, cy - s * 0.04f)
-                path.lineTo(cx + s * 0.04f, cy + s * 0.14f)
-                path.lineTo(cx + s * 0.18f, cy + s * 0.02f)
-                path.lineTo(cx + s * 0.42f, cy + s * 0.24f)
-                canvas.drawPath(path, p)
-                canvas.drawCircle(cx + s * 0.18f, cy - s * 0.14f, s * 0.06f, p)
-            }
-            Kind.REMOTE -> {
-                r.set(cx - s * 0.4f, cy - s * 0.2f, cx + s * 0.4f, cy + s * 0.34f)
-                canvas.drawRoundRect(r, s * 0.1f, s * 0.1f, p)
-                canvas.drawCircle(cx, cy + s * 0.07f, s * 0.13f, p)
-                canvas.drawLine(cx - s * 0.16f, cy - s * 0.38f, cx + s * 0.16f, cy - s * 0.38f, p)
+                add(rr(-0.44f, -0.22f, 0.34f, 0.22f, 0.07f))
+                add(rr(0.36f, -0.09f, 0.45f, 0.09f, 0.03f))
             }
             Kind.MACRO -> {
                 for (k in 0 until 5) {
                     val a = Math.toRadians(k * 72.0 - 90)
-                    canvas.drawCircle(cx + Math.cos(a).toFloat() * s * 0.18f, cy - s * 0.08f + Math.sin(a).toFloat() * s * 0.18f, s * 0.12f, p)
+                    add(circle(Math.cos(a).toFloat() * 0.17f, -0.1f + Math.sin(a).toFloat() * 0.17f, 0.13f))
                 }
-                canvas.drawLine(cx, cy + s * 0.16f, cx, cy + s * 0.44f, p)
+                cut(circle(0f, -0.1f, 0.06f))
+                bold.strokeWidth = maxOf(1.8f, s * 0.09f)
+                line(0f, 0.18f, 0f, 0.46f)
+            }
+            Kind.GAUGE -> {
+                val ring = circle(0f, 0.1f, 0.45f).apply { op(circle(0f, 0.1f, 0.28f), Path.Op.DIFFERENCE) }
+                val pie = Path().apply {
+                    moveTo(x(0f), y(0.1f))
+                    arcTo(RectF(x(-0.6f), y(-0.5f), x(0.6f), y(0.7f)), 160f, 220f)
+                    close()
+                }
+                ring.op(pie, Path.Op.INTERSECT)
+                add(ring)
+                add(bar(0f, 0.1f, 0.19f, -0.11f, 0.09f))
+                add(circle(0f, 0.1f, 0.08f))
+            }
+            Kind.ARCHIVE -> {
+                add(rr(-0.45f, -0.38f, 0.45f, -0.15f, 0.06f))
+                add(rr(-0.38f, -0.1f, 0.38f, 0.42f, 0.06f))
+                cut(rr(-0.13f, 0.03f, 0.13f, 0.11f, 0.04f))
+            }
+            Kind.GEAR -> {
+                add(circle(0f, 0f, 0.31f))
+                for (k in 0 until 8) {
+                    val a = Math.toRadians(k * 45.0)
+                    add(bar(Math.cos(a).toFloat() * 0.22f, Math.sin(a).toFloat() * 0.22f, Math.cos(a).toFloat() * 0.45f, Math.sin(a).toFloat() * 0.45f, 0.15f))
+                }
+                cut(circle(0f, 0f, 0.13f))
+            }
+            Kind.CHEVRON_LEFT -> {
+                bold.strokeWidth = maxOf(2.4f, s * 0.15f)
+                line(0.12f, -0.28f, -0.15f, 0f); line(-0.15f, 0f, 0.12f, 0.28f)
+            }
+            Kind.CHEVRON_RIGHT -> {
+                bold.strokeWidth = maxOf(2.4f, s * 0.15f)
+                line(-0.12f, -0.28f, 0.15f, 0f); line(0.15f, 0f, -0.12f, 0.28f)
+            }
+            Kind.CLOSE -> {
+                bold.strokeWidth = maxOf(2.2f, s * 0.13f)
+                line(-0.25f, -0.25f, 0.25f, 0.25f); line(0.25f, -0.25f, -0.25f, 0.25f)
+            }
+            Kind.PLUS -> {
+                bold.strokeWidth = maxOf(2.2f, s * 0.13f)
+                line(-0.3f, 0f, 0.3f, 0f); line(0f, -0.3f, 0f, 0.3f)
+            }
+            Kind.MINUS -> {
+                bold.strokeWidth = maxOf(2.2f, s * 0.13f)
+                line(-0.3f, 0f, 0.3f, 0f)
+            }
+            Kind.CHECK -> {
+                bold.strokeWidth = maxOf(2.2f, s * 0.14f)
+                strokes.moveTo(x(-0.3f), y(0.02f))
+                strokes.lineTo(x(-0.08f), y(0.23f))
+                strokes.lineTo(x(0.31f), y(-0.22f))
+            }
+            Kind.REFRESH -> {
+                arc(0f, 0.02f, 0.32f, -50f, 290f)
+                add(poly(0.1f, -0.44f, 0.4f, -0.3f, 0.14f, -0.12f))
+            }
+            Kind.SHARE -> {
+                add(poly(0f, -0.46f, 0.2f, -0.24f, -0.2f, -0.24f))
+                add(rr(-0.36f, -0.08f, 0.36f, 0.44f, 0.08f))
+                cut(rr(-0.24f, -0.12f, 0.24f, 0.3f, 0.03f))
+                add(rr(-0.055f, -0.3f, 0.055f, 0.12f, 0.03f))
+            }
+            Kind.TRASH -> {
+                add(rr(-0.4f, -0.33f, 0.4f, -0.22f, 0.04f))
+                add(rr(-0.13f, -0.45f, 0.13f, -0.3f, 0.04f))
+                add(poly(-0.31f, -0.17f, 0.31f, -0.17f, 0.25f, 0.44f, -0.25f, 0.44f))
+                cut(rr(-0.12f, -0.07f, -0.05f, 0.32f, 0.03f))
+                cut(rr(0.05f, -0.07f, 0.12f, 0.32f, 0.03f))
+            }
+            Kind.DOWNLOAD, Kind.UPLOAD -> {
+                val down = kind == Kind.DOWNLOAD
+                if (down) {
+                    add(rr(-0.07f, -0.44f, 0.07f, 0.0f, 0.04f))
+                    add(poly(-0.24f, -0.04f, 0.24f, -0.04f, 0f, 0.22f))
+                } else {
+                    add(rr(-0.07f, -0.18f, 0.07f, 0.24f, 0.04f))
+                    add(poly(-0.24f, -0.14f, 0.24f, -0.14f, 0f, -0.42f))
+                }
+                add(rr(-0.4f, 0.32f, 0.4f, 0.44f, 0.05f))
+            }
+            Kind.APERTURE -> {
+                add(circle(0f, 0f, 0.45f))
+                // Six blades: a hexagon in the middle and a slit from each corner to the rim.
+                val hex = FloatArray(12)
+                for (k in 0 until 6) {
+                    val a = Math.toRadians(k * 60.0 + 30)
+                    hex[2 * k] = Math.cos(a).toFloat() * 0.15f
+                    hex[2 * k + 1] = Math.sin(a).toFloat() * 0.15f
+                }
+                cut(poly(*hex))
+                for (k in 0 until 6) {
+                    val t = Math.toRadians(k * 60.0 + 120)
+                    val x0 = hex[2 * k]
+                    val y0 = hex[2 * k + 1]
+                    cut(bar(x0, y0, x0 + Math.cos(t).toFloat() * 0.5f, y0 + Math.sin(t).toFloat() * 0.5f, 0.05f))
+                }
+                shape.op(circle(0f, 0f, 0.45f), Path.Op.INTERSECT)
+            }
+            Kind.BLUETOOTH -> {
+                bold.strokeWidth = maxOf(2f, s * 0.11f)
+                strokes.moveTo(x(-0.22f), y(-0.2f))
+                strokes.lineTo(x(0.2f), y(0.18f))
+                strokes.lineTo(x(0f), y(0.42f))
+                strokes.lineTo(x(0f), y(-0.42f))
+                strokes.lineTo(x(0.2f), y(-0.18f))
+                strokes.lineTo(x(-0.22f), y(0.2f))
+            }
+            Kind.LOG -> {
+                add(rr(-0.33f, -0.43f, 0.33f, 0.43f, 0.08f))
+                for (k in -1..1) cut(rr(-0.18f, k * 0.17f - 0.035f, 0.18f, k * 0.17f + 0.035f, 0.035f))
+            }
+            Kind.PIN -> {
+                add(Path().apply {
+                    moveTo(x(0f), y(0.45f))
+                    cubicTo(x(-0.52f), y(-0.02f), x(-0.26f), y(-0.47f), x(0f), y(-0.44f))
+                    cubicTo(x(0.26f), y(-0.47f), x(0.52f), y(-0.02f), x(0f), y(0.45f))
+                    close()
+                })
+                cut(circle(0f, -0.12f, 0.12f))
+            }
+            Kind.LAB -> {
+                add(poly(-0.12f, -0.36f, -0.12f, -0.08f, -0.38f, 0.38f, 0.38f, 0.38f, 0.12f, -0.08f, 0.12f, -0.36f))
+                add(rr(-0.2f, -0.46f, 0.2f, -0.35f, 0.04f))
+                cut(rr(-0.18f, 0.12f, 0.18f, 0.18f, 0.03f))
+            }
+            Kind.LIBRARY -> {
+                add(rr(-0.4f, -0.38f, -0.24f, 0.4f, 0.04f))
+                add(rr(-0.18f, -0.38f, -0.02f, 0.4f, 0.04f))
+                add(poly(0.06f, -0.33f, 0.2f, -0.37f, 0.42f, 0.36f, 0.28f, 0.4f))
+            }
+            Kind.PHOTOS -> {
+                add(rr(-0.45f, -0.35f, 0.45f, 0.35f, 0.09f))
+                cut(rr(-0.33f, -0.23f, 0.33f, 0.23f, 0.03f))
+                add(poly(-0.33f, 0.23f, -0.33f, 0.12f, -0.14f, -0.06f, 0.04f, 0.12f, 0.15f, 0.02f, 0.33f, 0.17f, 0.33f, 0.23f))
+                add(circle(0.17f, -0.1f, 0.06f))
+            }
+            Kind.REMOTE -> {
+                add(rr(-0.43f, -0.2f, 0.43f, 0.36f, 0.1f))
+                cut(circle(0f, 0.08f, 0.15f))
+                add(circle(0f, 0.08f, 0.07f))
+                add(rr(-0.18f, -0.42f, 0.18f, -0.31f, 0.04f))
             }
         }
     }
 
-    private var alphaValue = 255
     override fun setAlpha(alpha: Int) {
         alphaValue = alpha
         invalidateSelf()
     }
 
     override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
-        p.colorFilter = colorFilter
+        solid.colorFilter = colorFilter
+        bold.colorFilter = colorFilter
     }
 
     @Deprecated("Deprecated in Java")

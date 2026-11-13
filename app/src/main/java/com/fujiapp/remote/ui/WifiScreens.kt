@@ -1,7 +1,6 @@
 package com.fujiapp.remote.ui
 
 import android.graphics.Bitmap
-import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -100,7 +99,7 @@ class PhotosScreen(private val a: MainActivity) {
 
     private fun tile(cp: CardPhoto): View = Kit.column(c).apply {
         val on = cp.photo.handle in selected
-        background = if (on) Deco.lit(c, 12f) else Deco.glass(c, 12f)
+        background = if (on) Deco.lit(c, 10f) else Deco.glass(c, 10f)
         val inset = Deco.dpi(c, Deco.Lit.INSET_DP.toInt()) + Deco.dpi(c, 3)
         setPadding(inset, inset, inset, inset)
         addView(ImageView(c).apply {
@@ -134,11 +133,7 @@ class RemoteScreen(private val a: MainActivity) {
         contentDescription = "Live view. Tap to focus there."
     }
     private val marker = View(c).apply {
-        background = GradientDrawable().apply {
-            setColor(0x1FEB9438)
-            setStroke(Deco.dpi(c, 2), Deco.AMBER_LIGHT)
-            cornerRadius = Deco.dp(c, 8f)
-        }
+        background = SquircleDrawable(0x1FEB9438, Deco.AMBER_LIGHT, Deco.dp(c, 2f), Deco.dp(c, 9f))
         visibility = View.GONE
     }
     /** The picture just taken, shown for a moment over the live view. */
@@ -160,10 +155,7 @@ class RemoteScreen(private val a: MainActivity) {
         background = Deco.glass(c, Layouts.CARD_RADIUS)
         val pad = Deco.dpi(c, FRAME_PAD_DP)
         setPadding(pad, pad, pad, pad)
-        addView(FrameLayout(c).apply {
-            background = Deco.box(c, 0xFF000000.toInt(), 0, Layouts.CARD_RADIUS - FRAME_PAD_DP)
-            outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
-            clipToOutline = true
+        addView(SquircleFrame(c, Deco.dp(c, Layouts.CARD_RADIUS - FRAME_PAD_DP)).apply {
             addView(live, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
             addView(postview, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
             addView(marker, FrameLayout.LayoutParams(Deco.dpi(c, MARKER_DP), Deco.dpi(c, MARKER_DP)))
@@ -311,7 +303,7 @@ class RemoteScreen(private val a: MainActivity) {
     /** "AUTO", lit: the camera picks this value. */
     private fun autoBadge(): View = Kit.label(c, "Auto", Deco.AMBER_LIGHT, 10f).apply {
         gravity = Gravity.CENTER
-        background = Deco.lit(c, 17f)
+        background = Deco.lit(c, 10f)
         val inset = Deco.dpi(c, Deco.Lit.INSET_DP.toInt())
         setPadding(Deco.dpi(c, 18) + inset, Deco.dpi(c, 7) + inset, Deco.dpi(c, 18) + inset, Deco.dpi(c, 7) + inset)
         visibility = View.GONE

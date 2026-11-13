@@ -115,7 +115,7 @@ class BackupsScreen(private val a: MainActivity) {
             val saved = Date(meta.savedAt)
             list.addView(Kit.column(c).apply {
                 contentDescription = DateFormat.getDateInstance(DateFormat.MEDIUM).format(saved)
-                background = Deco.glass(c, 16f, if (n == 0) GlassDrawable.Tone.WARM else GlassDrawable.Tone.PANE)
+                background = Deco.glass(c, 13f, if (n == 0) GlassDrawable.Tone.WARM else GlassDrawable.Tone.PANE)
                 setPadding(Deco.dpi(c, CARD_PAD), Deco.dpi(c, 16), Deco.dpi(c, CARD_PAD), Deco.dpi(c, 16))
                 addView(Kit.row(c).apply {
                     gravity = Gravity.CENTER_VERTICAL
@@ -145,7 +145,7 @@ class BackupsScreen(private val a: MainActivity) {
                             gravity = Gravity.CENTER
                             minHeight = Deco.dpi(c, 26)
                             setPadding(Deco.dpi(c, 10), 0, Deco.dpi(c, 10), 0)
-                            background = Deco.glass(c, -1f, GlassDrawable.Tone.WELL)
+                            background = Deco.glass(c, 8f, GlassDrawable.Tone.WELL)
                         })
                     }
                 }, Kit.lp(top = Deco.dpi(c, 12)))

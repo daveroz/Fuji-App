@@ -6,7 +6,6 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -128,26 +127,6 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
             if (uri != null) loadLabPhoto(uri)
         }
-
-    /** A photo of the user's camera for the Camera tab. */
-    private val pickCameraPhoto =
-        registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
-            if (uri != null) loadCameraPicture(uri)
-        }
-
-    fun pickCameraPicture() {
-        AppLog.ui("camera picture: pick")
-        pickCameraPhoto.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-    }
-
-    private fun loadCameraPicture(uri: Uri) {
-        lifecycleScope.launch {
-            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                decodeScaled(uri, CAMERA_PICTURE_MAX)?.let { CameraPicture.save(this@MainActivity, it); true } ?: false
-            }
-            if (ok) render() else showNotice("Couldn't open that picture.")
-        }
-    }
 
     /** A RAW (RAF) to develop on the camera. */
     private val pickRaf =
@@ -278,13 +257,13 @@ class MainActivity : AppCompatActivity() {
 
         // The tab bar floats over the page: a capsule of glass, the chosen tab a lighter lens in it.
         val tabBar = Kit.row(c).apply {
-            background = Deco.glass(c, -1f, GlassDrawable.Tone.BAR)
+            background = Deco.glass(c, 20f, GlassDrawable.Tone.BAR)
             val pad = Deco.dpi(c, 6)
             setPadding(pad, pad, pad, pad)
             elevation = Deco.dp(c, 12f)
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, view.height / 2f)
+                    outline.setRoundRect(0, 0, view.width, view.height, Deco.dp(view.context, 22f))
                     outline.alpha = 0.5f
                 }
             }
@@ -320,7 +299,7 @@ class MainActivity : AppCompatActivity() {
         content.clipToPadding = false
 
         notice = Kit.text(c, null, 14f, Deco.TEXT).apply {
-            background = Deco.glass(c, 16f, GlassDrawable.Tone.BAR)
+            background = Deco.glass(c, 13f, GlassDrawable.Tone.BAR)
             setPadding(Deco.dpi(c, 18), Deco.dpi(c, 14), Deco.dpi(c, 18), Deco.dpi(c, 14))
             visibility = View.GONE
             setOnClickListener {
@@ -364,7 +343,7 @@ class MainActivity : AppCompatActivity() {
         tab = t
         tabViews.forEach { (k, v) ->
             val on = k == t
-            v.first.background = if (on) Deco.glass(this, -1f, GlassDrawable.Tone.LENS) else null
+            v.first.background = if (on) Deco.glass(this, 15f, GlassDrawable.Tone.LENS) else null
             v.second.setTextColor(if (on) Deco.TEXT else Deco.DIM)
             tabIcons[k]?.tint = if (on) Deco.AMBER_LIGHT else Deco.DIM
         }
@@ -794,7 +773,5 @@ class MainActivity : AppCompatActivity() {
         const val TAB_BAR_MARGIN = 14
         /** A camera backup is a few KB compressed, about 70 KB unpacked. */
         const val MAX_IMPORT_BYTES = 2 * 1024 * 1024
-        /** Longest side the camera picture is kept at. */
-        const val CAMERA_PICTURE_MAX = 1400
     }
 }

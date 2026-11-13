@@ -89,7 +89,7 @@ class LabScreen(private val a: MainActivity) {
         isSingleLine = true
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
         filters = arrayOf(InputFilter.LengthFilter(Recipe.NAME_MAX), InputFilter.AllCaps())
-        background = Deco.box(c, Deco.WELL, Deco.BORDER, 12f)
+        background = Deco.glass(c, 10f, GlassDrawable.Tone.WELL)
         setPadding(Deco.dpi(c, 12), Deco.dpi(c, 8), Deco.dpi(c, 12), Deco.dpi(c, 8))
         addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, st: Int, co: Int, af: Int) = Unit
@@ -566,7 +566,7 @@ private class RoundedImageView(c: android.content.Context, private val radius: F
         imageMatrix.mapRect(box)
         box.offset(paddingLeft.toFloat(), paddingTop.toFloat())
         clip.reset()
-        clip.addRoundRect(box, radius, radius, android.graphics.Path.Direction.CW)
+        squirclePath(clip, box, radius)
         val save = canvas.save()
         canvas.clipPath(clip)
         super.onDraw(canvas)
