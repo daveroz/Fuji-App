@@ -377,6 +377,12 @@ class RemoteScreen(private val a: MainActivity) {
         if (frame != null) live.setImageBitmap(frame)
     }
 
+    /** The picture just taken, over the live view for a moment; null hides it. */
+    fun showPostview(shot: Bitmap?) {
+        if (shot != null) postview.setImageBitmap(shot) else postview.setImageDrawable(null)
+        postview.isVisible = shot != null
+    }
+
 
 
     fun render() {

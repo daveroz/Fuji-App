@@ -43,6 +43,13 @@ class WifiTest {
     }
 
     @Test
+    fun capturePreviewFindsItsJpeg() {
+        assertEquals(0, FujiWifi.jpegStart(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE1.toByte())))
+        assertEquals(4, FujiWifi.jpegStart(byteArrayOf(1, 2, 3, 4, 0xFF.toByte(), 0xD8.toByte(), 0)))
+        assertEquals(-1, FujiWifi.jpegStart(ByteArray(16)))
+    }
+
+    @Test
     fun handlesComeFromTheCountedList() {
         val d = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).putInt(2).putInt(2).putInt(1).array()
         assertEquals(listOf(2, 1), FujiWifi.handles(d))

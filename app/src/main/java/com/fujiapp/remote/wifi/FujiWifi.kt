@@ -347,6 +347,27 @@ class FujiWifi private constructor(
     fun capture(): Int = transact(INITIATE_CAPTURE, listOf(0, 0)).code
 
     /**
+     * The picture just taken, as the small JPEG the camera shows after a shot (XApp's postview,
+     * Fujifilm's GetCapturePreview). The camera announces it with event 0xC001 and holds the shot
+     * until it's fetched: left unfetched, it stays busy for about 25 s and then gives up.
+     */
+    fun capturePreview(): ByteArray? {
+        var r = transact(GET_CAPTURE_PREVIEW)
+        log("wifi: capture preview -> ${Ptp.responseName(r.code)}, ${r.data.size} bytes")
+        if (!r.ok && r.code != Ptp.DEVICE_BUSY) {
+            r = transact(GET_CAPTURE_PREVIEW, listOf(0))
+            log("wifi: capture preview (0) -> ${Ptp.responseName(r.code)}, ${r.data.size} bytes")
+        }
+        if (!r.ok || r.data.size < 4) return null
+        val start = jpegStart(r.data)
+        if (start < 0) {
+            log("wifi: capture preview isn't a JPEG: ${r.data.take(24).joinToString(" ") { "%02x".format(it) }}")
+            return null
+        }
+        return if (start == 0) r.data else r.data.copyOfRange(start, r.data.size)
+    }
+
+    /**
      * Half press (focus and lock), as XApp's touch AF: LockS1Lock with a focus point packed as
      * aspect width, aspect height, column, row (one byte each; columns and rows count from 1 on the
      * camera's grid). Without a point, the camera's current one (property 0xD17C) is used.
@@ -355,7 +376,7 @@ class FujiWifi private constructor(
         val current = get(S1_LOCK_POINT)?.takeIf { it.size >= 4 }?.let { u32(it, 0) }
         var point = current ?: 0
         if (at != null && current != null) {
-            val (cols, rows) = focusGrid ?: grid(current).also { focusGrid = it }
+            val (cols, rows) = focusGrid ?: grid().also { focusGrid = it }
             if (cols > 0 && rows > 0) {
                 val col = (at.first * cols).toInt().coerceIn(0, cols - 1) + 1
                 val row = (at.second * rows).toInt().coerceIn(0, rows - 1) + 1
@@ -370,20 +391,23 @@ class FujiWifi private constructor(
 
     /**
      * The camera's focus grid, columns × rows: the low two bytes of 0xD17C's maximum, as XApp reads
-     * it. If the description doesn't say, assume the current point is the middle one (the X100VI's
-     * 13 × 9 grid has its centre at 7, 5).
+     * it, from the camera's settings list (0x902B) or its own description. If neither says, the
+     * X100VI's 13 × 9 grid. (Guessing from the current point, as before, made the point creep
+     * towards a corner when it wasn't the middle one.)
      */
-    private fun grid(current: Int): Pair<Int, Int> {
-        val desc = transact(GET_DEVICE_PROP_DESC, listOf(S1_LOCK_POINT))
-        log("wifi: focus point description ${desc.data.size} bytes: ${desc.data.take(48).joinToString(" ") { "%02x".format(it) }}")
-        val d = if (desc.ok) parseDesc(desc.data) else null
-        val max = (d?.max ?: d?.values?.maxOrNull())?.toInt()
-        val fromDesc = max?.let { ((it shr 8) and 0xFF) to (it and 0xFF) }?.takeIf { it.first in 2..60 && it.second in 2..60 }
-        val col = (current shr 8) and 0xFF
-        val row = current and 0xFF
-        val guessed = (2 * col - 1 to 2 * row - 1).takeIf { col > 1 && row > 1 }
-        val g = fromDesc ?: guessed ?: (0 to 0)
-        log("wifi: focus grid ${g.first} × ${g.second}${if (fromDesc == null) " (from the current point)" else ""}")
+    private fun grid(): Pair<Int, Int> {
+        fun gridOf(d: PropDesc?): Pair<Int, Int>? {
+            val max = (d?.max ?: d?.values?.maxOrNull())?.toInt() ?: return null
+            return (((max shr 8) and 0xFF) to (max and 0xFF)).takeIf { it.first in 2..60 && it.second in 2..60 }
+        }
+        val listed = gridOf(offered[S1_LOCK_POINT])
+        val described = listed ?: run {
+            val desc = transact(GET_DEVICE_PROP_DESC, listOf(S1_LOCK_POINT))
+            log("wifi: focus point description ${desc.data.size} bytes: ${desc.data.take(48).joinToString(" ") { "%02x".format(it) }}")
+            gridOf(if (desc.ok) parseDesc(desc.data) else null)
+        }
+        val g = described ?: DEFAULT_GRID
+        log("wifi: focus grid ${g.first} × ${g.second}${if (described == null) " (the X100VI's)" else ""}")
         return g
     }
 
@@ -402,8 +426,16 @@ class FujiWifi private constructor(
     fun deviceDescs(): Map<Int, PropDesc> {
         val r = transact(FUJI_DEVICE_INFO)
         if (!r.ok) return emptyMap()
-        return parseDeviceDescs(r.data).also { log("wifi: camera offers ${it.size} settings: ${it.keys.joinToString(",") { k -> "%04X".format(k) }}") }
+        return parseDeviceDescs(r.data).also {
+            offered = it
+            log("wifi: camera offers ${it.size} settings: ${it.keys.joinToString(",") { k -> "%04X".format(k) }}")
+            it[S1_LOCK_POINT]?.let { d -> log("wifi: focus point range 0x%X … 0x%X".format(d.min ?: -1, d.max ?: -1)) }
+        }
     }
+
+    /** The descriptions from the last [deviceDescs]: the focus grid is read from them. */
+    @Volatile
+    private var offered: Map<Int, PropDesc> = emptyMap()
 
     /** A property's description: current value and its range or allowed values. */
     fun propDesc(property: Int): PropDesc? {
@@ -522,6 +554,14 @@ class FujiWifi private constructor(
         const val EVENT_PREVIEW_AVAILABLE = 0xC001
         /** Standard PTP CaptureComplete: the camera has finished the shot. */
         const val EVENT_CAPTURE_COMPLETE = 0x400D
+        const val GET_CAPTURE_PREVIEW = 0x9022
+        private val DEFAULT_GRID = 13 to 9
+
+        /** Where a JPEG starts (FF D8) in the first few KB of [d], or -1. */
+        fun jpegStart(d: ByteArray): Int {
+            for (i in 0 until minOf(d.size - 1, 4096)) if (d[i] == 0xFF.toByte() && d[i + 1] == 0xD8.toByte()) return i
+            return -1
+        }
         const val GET_DEVICE_PROP_DESC = 0x1014
         const val TERMINATE_OPEN_CAPTURE = 0x1018
         const val GET_PARTIAL_OBJECT = 0x101B

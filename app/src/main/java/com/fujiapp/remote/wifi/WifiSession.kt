@@ -299,8 +299,15 @@ class WifiSession(context: Context, private val camera: CameraSession) {
             while (isActive) {
                 val (code, params) = w.nextEvent() ?: break
                 AppLog.add("remote: event 0x%04X %s".format(code, params.joinToString(",") { "0x%X".format(it) }))
-                // The shot is done (PTP CaptureComplete): talk to the camera again, as XApp does.
-                if (code == FujiWifi.EVENT_CAPTURE_COMPLETE) scope.launch { captureDone("capture complete") }
+                when (code) {
+                    // The picture is on the card; its preview follows (0xC001) unless the camera's
+                    // image display is off.
+                    FujiWifi.EVENT_OBJECT_ADDED -> scope.launch { shotSaved() }
+                    // The camera holds the shot until its preview is fetched, as XApp does.
+                    FujiWifi.EVENT_PREVIEW_AVAILABLE -> scope.launch { fetchPreview(w) }
+                    // PTP CaptureComplete: the camera is done either way.
+                    FujiWifi.EVENT_CAPTURE_COMPLETE -> scope.launch { captureDone("capture complete") }
+                }
             }
         }
         // The camera's dials win over the app: follow them as they turn (XApp polls the same list).
@@ -346,6 +353,42 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         _capturing.value = false
         AppLog.add("wifi: shot finished ($why)")
         _note.value = "Picture taken."
+    }
+
+    private val _postview = MutableStateFlow<Bitmap?>(null)
+    /** The picture just taken, shown over the live view for a moment (XApp's postview). */
+    val postview: StateFlow<Bitmap?> = _postview.asStateFlow()
+    private var postviewJob: Job? = null
+
+    /** The picture is on the card: wait a little for its preview, then carry on without it. */
+    private fun shotSaved() {
+        if (!_capturing.value) return
+        _note.value = "Saving the picture…"
+        captureWatch?.cancel()
+        captureWatch = scope.launch {
+            delay(PREVIEW_WAIT_MS)
+            captureDone("saved, no preview offered")
+        }
+    }
+
+    /** Fetch the shot's preview, which lets the camera go on, and show it for a moment. */
+    private suspend fun fetchPreview(w: FujiWifi) {
+        val jpeg = try {
+            io.withLock { withContext(Dispatchers.IO) { w.capturePreview() } }
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            AppLog.add("wifi: capture preview failed: ${t.message}")
+            null
+        }
+        captureDone(if (jpeg != null) "preview fetched, ${jpeg.size} bytes" else "preview not fetched")
+        val bmp = jpeg?.let { withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(it, 0, it.size) } } ?: return
+        _postview.value = bmp
+        postviewJob?.cancel()
+        postviewJob = scope.launch {
+            delay(POSTVIEW_SHOW_MS)
+            _postview.value = null
+        }
     }
 
     private fun capture() = remote("shoot", whileCapturing = true) { w ->
@@ -620,6 +663,7 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         val events = eventJob
         eventJob = null
         _frame.value = null
+        _postview.value = null
         // A camera left in the middle of a shot (or cut off before it heard goodbye) can hang until
         // its battery comes out: let a fresh shot finish, end the session over the network, and
         // only then let Android drop the camera's Wi-Fi.
@@ -632,7 +676,10 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         val network = join
         scope.launch(Dispatchers.IO) {
             if (w != null) {
-                if (wait > 0) {
+                // A shot still held for its preview: fetching the preview is what lets it go.
+                val freed = pending && runCatching { io.withLock { w.capturePreview() } }.getOrNull() != null
+                if (freed) AppLog.add("wifi: fetched the last shot's preview before closing")
+                else if (wait > 0) {
                     AppLog.add("wifi: letting the last shot finish (${wait / 1000.0} s) before closing")
                     delay(wait)
                 }
@@ -671,6 +718,9 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         private const val CAPTURE_SETTLE_MS = 6_000L
         /** XApp waits for the camera's word after a shot; past this the app carries on. */
         private const val CAPTURE_TIMEOUT_MS = 30_000L
+        /** After the picture is saved, how long to wait for the camera to offer its preview. */
+        private const val PREVIEW_WAIT_MS = 4_000L
+        private const val POSTVIEW_SHOW_MS = 2_500L
         /** Polls failing in a row before the connection counts as lost. */
         private const val DEAD_AFTER = 3
         const val USB_PLUGGED = "The camera is connected by USB, and won't start its Wi-Fi like that. Unplug the cable, then try again."

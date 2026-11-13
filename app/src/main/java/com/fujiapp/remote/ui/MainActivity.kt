@@ -206,6 +206,9 @@ class MainActivity : AppCompatActivity() {
                     wifi.frame.collect { if (cameraPage == CameraPage.REMOTE) remoteScreen.showFrame(it) }
                 }
                 launch {
+                    wifi.postview.collect { remoteScreen.showPostview(it) }
+                }
+                launch {
                     session.notice.collect { message ->
                         if (message != null) {
                             showNotice(message)
