@@ -9,9 +9,15 @@ class LibraryScreen(private val a: MainActivity) {
     private val c = a
     private val groups = listOf(null, LibraryRecipe.Group.FILM, LibraryRecipe.Group.CINEMA, LibraryRecipe.Group.MINE)
     private var group: LibraryRecipe.Group? = null
-    private val filter = Kit.Chips(c, listOf("All", "Film stocks", "Cinema", "My recipes")) { i ->
-        group = groups[i]
-        refresh()
+    // Which recipes show, as a segmented control like Camera / Library / Lab: the chosen one is lit.
+    private lateinit var filter: Kit.Segmented
+
+    init {
+        filter = Kit.Segmented(c, listOf("All", "Film stocks", "Cinema", "My recipes")) { i ->
+            group = groups[i]
+            filter.select(i)
+            refresh()
+        }
     }
     private val list = Kit.column(c)
     private val expanded = HashSet<String>()

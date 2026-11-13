@@ -133,7 +133,7 @@ class RemoteScreen(private val a: MainActivity) {
         contentDescription = "Live view. Tap to focus there."
     }
     private val marker = View(c).apply {
-        background = SquircleDrawable(0x1FEB9438, Deco.AMBER_LIGHT, Deco.dp(c, 2f), Deco.dp(c, 9f))
+        background = RoundedDrawable(0x1FEB9438, Deco.AMBER_LIGHT, Deco.dp(c, 2f), Deco.dp(c, 9f))
         visibility = View.GONE
     }
     /** The picture just taken, shown for a moment over the live view. */
@@ -155,7 +155,7 @@ class RemoteScreen(private val a: MainActivity) {
         background = Deco.glass(c, Layouts.CARD_RADIUS)
         val pad = Deco.dpi(c, FRAME_PAD_DP)
         setPadding(pad, pad, pad, pad)
-        addView(SquircleFrame(c, Deco.dp(c, Layouts.CARD_RADIUS - FRAME_PAD_DP)).apply {
+        addView(RoundedFrame(c, Deco.dp(c, Layouts.CARD_RADIUS - FRAME_PAD_DP)).apply {
             addView(live, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
             addView(postview, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
             addView(marker, FrameLayout.LayoutParams(Deco.dpi(c, MARKER_DP), Deco.dpi(c, MARKER_DP)))

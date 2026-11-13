@@ -96,8 +96,8 @@ object Stagelight {
  * Liquid glass, kept quiet: a pane of charcoal that lets a little of the stage through, a touch
  * lighter at its top left where the light catches it, deeper at the bottom, with film grain and a
  * hairline rim, brightest at the corners. It picks up the light behind it faintly (see
- * [Stagelight]), and its rim warms a little where the key light falls. Corners are squircles
- * (continuous curves, see [squirclePath]); [radius] < 0 makes a capsule and [round] a circle.
+ * [Stagelight]), and its rim warms a little where the key light falls. Corners are rounded
+ * ([roundedPath]); [radius] < 0 takes a control's corner, and [round] a button's fuller one.
  */
 class GlassDrawable(
     context: Context,
@@ -184,14 +184,14 @@ class GlassDrawable(
         rimWarmth = -1f
     }
 
-    /** The shape: always a squircle (a "round" button is a squircle with a fuller corner). */
+    /** The shape: always a rounded square (a "round" button has a fuller corner). */
     private fun outline(path: android.graphics.Path, r: RectF, inset: Float) {
         val corner = when {
             round -> min(r.width(), r.height()) * ROUND_SHARE
             radius < 0 -> CONTROL_RADIUS_DP * density
             else -> radius
         }
-        squirclePath(path, r, max(0f, corner - inset))
+        roundedPath(path, r, max(0f, corner - inset))
     }
 
     override fun draw(canvas: Canvas) {
@@ -258,7 +258,7 @@ class GlassDrawable(
     companion object {
         /** A control's corner (buttons, chips, the switch), in dp. */
         const val CONTROL_RADIUS_DP = 12f
-        /** A "round" button's corner, as a share of its size: a squircle, not a circle. */
+        /** A "round" button's corner, as a share of its size: a rounded square, not a circle. */
         const val ROUND_SHARE = 0.27f
 
         /** The light, about as bright in the glass as around it, a little richer. */
@@ -270,7 +270,7 @@ class GlassDrawable(
 }
 
 /**
- * The key action: solid amber, a squircle, with a soft glow around it (drawn once per size into a
+ * The key action: solid amber, a rounded square, with a soft glow around it (drawn once per size into a
  * picture, inside an inset that leaves room for the glow).
  */
 class KeyDrawable(context: Context, private val radius: Float, private val pressed: Boolean = false) : Drawable() {
@@ -289,7 +289,7 @@ class KeyDrawable(context: Context, private val radius: Float, private val press
             val c = Canvas(bmp)
             val r = RectF(inset, inset, b.width() - inset, b.height() - inset)
             val rad = if (radius < 0) GlassDrawable.CONTROL_RADIUS_DP * density else radius
-            val path = android.graphics.Path().also { squirclePath(it, r, rad) }
+            val path = android.graphics.Path().also { roundedPath(it, r, rad) }
             c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = if (pressed) 0x80EB9438.toInt() else 0x47EB9438
                 maskFilter = BlurMaskFilter(inset, BlurMaskFilter.Blur.OUTER)
@@ -441,11 +441,11 @@ class GlassSwitch(c: Context) : View(c) {
         glow.color = 0x66EB9438
         glow.maskFilter = BlurMaskFilter(5 * d, BlurMaskFilter.Blur.NORMAL)
         on.shader = onShader
-        squirclePath(trackPath, r, GlassDrawable.CONTROL_RADIUS_DP * d)
+        roundedPath(trackPath, r, GlassDrawable.CONTROL_RADIUS_DP * d)
         val k = RectF(r.right - rad - kr, ky - kr, r.right - rad + kr, ky + kr)
-        squirclePath(knobOnPath, k, kr * 2 * GlassDrawable.ROUND_SHARE)
+        roundedPath(knobOnPath, k, kr * 2 * GlassDrawable.ROUND_SHARE)
         k.offsetTo(r.left + rad - kr, ky - kr)
-        squirclePath(knobOffPath, k, kr * 2 * GlassDrawable.ROUND_SHARE)
+        roundedPath(knobOffPath, k, kr * 2 * GlassDrawable.ROUND_SHARE)
     }
 
     private val trackPath = android.graphics.Path()
@@ -523,63 +523,22 @@ class LedRing(c: Context) : View(c) {
 @Suppress("FunctionName") // reads as the drawable it makes
 fun SegmentLens(c: Context): Drawable = GlassDrawable(c, 9f * c.resources.displayMetrics.density, tone = GlassDrawable.Tone.LENS)
 
-/**
- * A rounded rectangle with continuous ("squircle") corners, as iOS draws them: each corner eases
- * out of the straight edge ([smoothing] more of the edge than a circle would take), turns through
- * a short arc, and eases back in, so there's no visible kink where the curve meets the edge.
- * After Figma's corner smoothing. [radius] is the corner's arc radius; it's reduced to fit.
- */
-fun squirclePath(path: android.graphics.Path, r: RectF, radius: Float, smoothing: Float = 0.6f) {
+/** A rectangle with rounded corners of [radius] (reduced to fit), the one shape the app uses. */
+fun roundedPath(path: android.graphics.Path, r: RectF, radius: Float) {
     path.reset()
-    val w = r.width()
-    val h = r.height()
-    if (w <= 0f || h <= 0f) return
-    val rad = min(radius, min(w, h) / 2 / (1 + smoothing)).coerceAtLeast(0f)
-    if (rad <= 0f) {
-        path.addRect(r, android.graphics.Path.Direction.CW)
-        return
-    }
-    val p = (1 + smoothing) * rad
-    val arcDeg = 90f * (1 - smoothing)
-    val arcLen = (sin(Math.toRadians(arcDeg / 2.0)) * rad * Math.sqrt(2.0)).toFloat()
-    val alpha = (90f - arcDeg) / 2
-    val p34 = (rad * kotlin.math.tan(Math.toRadians(alpha / 2.0))).toFloat()
-    val beta = 45f * smoothing
-    val c = (p34 * cos(Math.toRadians(beta.toDouble()))).toFloat()
-    val d = (c * kotlin.math.tan(Math.toRadians(beta.toDouble()))).toFloat()
-    val b = (p - arcLen - c - d) / 3
-    val a = 2 * b
-    val oval = RectF()
-    // One corner in a frame where the vertex is the origin, the incoming edge runs along +x and the
-    // outgoing one along +y; [k] turns it a quarter at a time (top right, bottom right, ...).
-    fun corner(vx: Float, vy: Float, k: Int, first: Boolean) {
-        fun mx(x: Float, y: Float) = vx + when (k) { 0 -> x; 1 -> -y; 2 -> -x; else -> y }
-        fun my(x: Float, y: Float) = vy + when (k) { 0 -> y; 1 -> x; 2 -> -y; else -> -x }
-        val sx = -p
-        if (first) path.moveTo(mx(sx, 0f), my(sx, 0f)) else path.lineTo(mx(sx, 0f), my(sx, 0f))
-        path.cubicTo(mx(sx + a, 0f), my(sx + a, 0f), mx(sx + a + b, 0f), my(sx + a + b, 0f), mx(sx + a + b + c, d), my(sx + a + b + c, d))
-        val cx = mx(-rad, rad)
-        val cy = my(-rad, rad)
-        oval.set(cx - rad, cy - rad, cx + rad, cy + rad)
-        path.arcTo(oval, -45f - arcDeg / 2 + 90f * k, arcDeg, false)
-        // From the arc's end, (−d, p − a − b − c), ease into the outgoing edge.
-        path.cubicTo(mx(0f, p - a - b), my(0f, p - a - b), mx(0f, p - a), my(0f, p - a), mx(0f, p), my(0f, p))
-    }
-    corner(r.right, r.top, 0, true)
-    corner(r.right, r.bottom, 1, false)
-    corner(r.left, r.bottom, 2, false)
-    corner(r.left, r.top, 3, false)
-    path.close()
+    if (r.width() <= 0f || r.height() <= 0f) return
+    val rad = min(radius, min(r.width(), r.height()) / 2).coerceAtLeast(0f)
+    path.addRoundRect(r, rad, rad, android.graphics.Path.Direction.CW)
 }
 
 /**
- * A plain squircle: a fill and an optional hairline (Deco.box), for small solid shapes. It can be
+ * A plain rounded square: a fill and an optional hairline (Deco.box), for small solid shapes. It can be
  * copied ([getConstantState]): Material's slider copies the thumb it's given, and a drawable that
  * can't be copied crashes it.
  */
-class SquircleDrawable(private val fill: Int, private val stroke: Int, private val strokeWidth: Float, private val radius: Float) : Drawable() {
+class RoundedDrawable(private val fill: Int, private val stroke: Int, private val strokeWidth: Float, private val radius: Float) : Drawable() {
     private val state = object : ConstantState() {
-        override fun newDrawable(): Drawable = SquircleDrawable(fill, stroke, strokeWidth, radius)
+        override fun newDrawable(): Drawable = RoundedDrawable(fill, stroke, strokeWidth, radius)
         override fun getChangingConfigurations(): Int = 0
     }
 
@@ -591,9 +550,9 @@ class SquircleDrawable(private val fill: Int, private val stroke: Int, private v
 
     override fun onBoundsChange(bounds: Rect) {
         val r = RectF(bounds)
-        squirclePath(path, r, radius)
+        roundedPath(path, r, radius)
         val h = strokeWidth / 2
-        squirclePath(edge, RectF(r.left + h, r.top + h, r.right - h, r.bottom - h), max(0f, radius - h))
+        roundedPath(edge, RectF(r.left + h, r.top + h, r.right - h, r.bottom - h), max(0f, radius - h))
     }
 
     override fun draw(canvas: Canvas) {
@@ -616,9 +575,9 @@ class SquircleDrawable(private val fill: Int, private val stroke: Int, private v
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }
 
-/** A frame whose children are clipped to a squircle, on a ground colour (pictures set into glass). */
+/** A frame whose children are clipped to rounded corners, on a ground colour (pictures set into glass). */
 @SuppressLint("ViewConstructor") // made in code only
-class SquircleFrame(c: Context, private val radius: Float, ground: Int = 0xFF000000.toInt()) : android.widget.FrameLayout(c) {
+class RoundedFrame(c: Context, private val radius: Float, ground: Int = 0xFF000000.toInt()) : android.widget.FrameLayout(c) {
     private val clip = android.graphics.Path()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ground }
 
@@ -627,7 +586,7 @@ class SquircleFrame(c: Context, private val radius: Float, ground: Int = 0xFF000
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        squirclePath(clip, RectF(0f, 0f, w.toFloat(), h.toFloat()), radius)
+        roundedPath(clip, RectF(0f, 0f, w.toFloat(), h.toFloat()), radius)
     }
 
     override fun onDraw(canvas: Canvas) {

@@ -175,8 +175,8 @@ class LabScreen(private val a: MainActivity) {
 
     val view: View = Kit.column(c).apply {
         val m = Deco.dpi(c, Kit.PAGE_MARGIN)
-        // Its foot clears the floating tab bar.
-        setPadding(m, Deco.dpi(c, 10), m, Deco.dpi(c, Kit.TAB_SPACE))
+        // Its foot just clears the floating tab bar: the Lab needs every bit of height.
+        setPadding(m, Deco.dpi(c, 8), m, Deco.dpi(c, Kit.TAB_CLEAR))
         addView(Kit.row(c).apply {
             addView(name, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 8) })
             addView(small("Picture") {
@@ -187,19 +187,19 @@ class LabScreen(private val a: MainActivity) {
             addView(small("Library") { a.recipeFlow.chooseStart() })
             addView(small("Camera") { a.recipeFlow.develop(recipe) })
         })
-        addView(frame, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, FRAME_DP)).apply { topMargin = Deco.dpi(c, 10) })
+        addView(frame, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, FRAME_DP)).apply { topMargin = Deco.dpi(c, 8) })
         addView(Kit.row(c).apply {
             addView(tabs.view, Kit.lp(0, weight = 1f))
             addView(scopeToggle.view, Kit.lp(Kit.WRAP).apply { marginStart = Deco.dpi(c, 4) })
-        }, Kit.lp(top = Deco.dpi(c, 10)))
+        }, Kit.lp(top = Deco.dpi(c, 8)))
         addView(ScrollView(c).apply {
             isVerticalScrollBarEnabled = false
             addView(controls, FrameLayout.LayoutParams(Kit.MATCH, Kit.WRAP))
         }, Kit.lp(h = 0, weight = 1f).apply { topMargin = Deco.dpi(c, 4) })
         addView(Kit.row(c).apply {
-            addView(Kit.button(c, "Load into a slot", icon = LineIcon.Kind.UPLOAD) { a.recipeFlow.load(recipe) }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 8) })
-            addView(Kit.button(c, "Save", Kit.Style.SECONDARY, LineIcon.Kind.CHECK) { a.recipeFlow.saveMine(recipe) }, Kit.lp(Kit.WRAP))
-        }, Kit.lp(top = Deco.dpi(c, 8)))
+            addView(Kit.button(c, "Load into a slot", icon = LineIcon.Kind.UPLOAD, compact = true) { a.recipeFlow.load(recipe) }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 8) })
+            addView(Kit.button(c, "Save", Kit.Style.SECONDARY, LineIcon.Kind.CHECK, compact = true) { a.recipeFlow.saveMine(recipe) }, Kit.lp(Kit.WRAP))
+        }, Kit.lp(top = Deco.dpi(c, 6)))
     }
 
     init {
@@ -505,9 +505,11 @@ class LabScreen(private val a: MainActivity) {
         private const val THUMB_DEBOUNCE_MS = 250L
         /** How long the controls must rest before the camera develops again. */
         private const val AUTO_DEVELOP_MS = 600L
-        private const val FRAME_DP = 224
-        private const val FRAME_MIN_DP = 180
-        private const val FRAME_MAX_DP = 280
+        // The preview's height, fitted to the picture within these: shorter than before, so the
+        // settings under it have room without scrolling.
+        private const val FRAME_DP = 190
+        private const val FRAME_MIN_DP = 150
+        private const val FRAME_MAX_DP = 200
         private const val FRAME_PAD_DP = 4
         /** Film simulations in the camera's menu order, with short names for the chips. */
         private val SIMS = listOf(
@@ -566,7 +568,7 @@ private class RoundedImageView(c: android.content.Context, private val radius: F
         imageMatrix.mapRect(box)
         box.offset(paddingLeft.toFloat(), paddingTop.toFloat())
         clip.reset()
-        squirclePath(clip, box, radius)
+        roundedPath(clip, box, radius)
         val save = canvas.save()
         canvas.clipPath(clip)
         super.onDraw(canvas)

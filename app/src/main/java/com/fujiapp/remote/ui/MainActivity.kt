@@ -218,7 +218,7 @@ class MainActivity : AppCompatActivity() {
         val c = this
         // The header is see-through: the stage's ceiling lamps hang above the title.
         val header = Kit.column(c).apply {
-            setPadding(Deco.dpi(c, Kit.PAGE_MARGIN), Deco.dpi(c, HEADER_TOP), Deco.dpi(c, Kit.PAGE_MARGIN), Deco.dpi(c, 16))
+            setPadding(Deco.dpi(c, Kit.PAGE_MARGIN), Deco.dpi(c, HEADER_TOP), Deco.dpi(c, Kit.PAGE_MARGIN), Deco.dpi(c, 12))
             addView(Kit.row(c).apply {
                 addView(Kit.column(c).apply {
                     addView(Kit.label(c, "Fuji Remote", Deco.AMBER_LIGHT, 10f))
@@ -767,7 +767,7 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         /** Room above the title for the stage's ceiling lamps, in dp. */
-        const val HEADER_TOP = 24
+        const val HEADER_TOP = 16
         /** The floating tab bar's height and its margin from the screen's edges, in dp. */
         const val TAB_BAR_DP = 70
         const val TAB_BAR_MARGIN = 14

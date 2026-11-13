@@ -26,6 +26,8 @@ object Kit {
     private const val PANEL_RADIUS = 13f
     /** Room at the foot of a page for the floating tab bar (70 dp and its margin, and a little air). */
     const val TAB_SPACE = 104
+    /** The least room that clears the tab bar (70 dp and its 14 dp margin), for screens short of height. */
+    const val TAB_CLEAR = 88
     /** Buttons are pills, like the references' big rounded actions. */
     private const val BUTTON_RADIUS = 12f
 
@@ -125,8 +127,12 @@ object Kit {
 
     enum class Style { PRIMARY, SECONDARY, QUIET }
 
-    /** A button: the amber key (primary), a glass pill (secondary) or text only (quiet). */
-    fun button(c: Context, title: String, style: Style = Style.PRIMARY, icon: LineIcon.Kind? = null, onClick: () -> Unit) = TextView(c).apply {
+    /**
+     * A button: the amber key (primary), glass (secondary) or text only (quiet). Its label stays on
+     * one line, shrinking to fit a narrow button rather than wrapping. [compact] is 44 dp tall
+     * instead of 52, for screens that need the room.
+     */
+    fun button(c: Context, title: String, style: Style = Style.PRIMARY, icon: LineIcon.Kind? = null, compact: Boolean = false, onClick: () -> Unit) = TextView(c).apply {
         text = title
         val color = when (style) {
             Style.PRIMARY -> KeyDrawable.INK
@@ -134,16 +140,18 @@ object Kit {
             Style.QUIET -> Deco.MUTED
         }
         Deco.label(c, this, 12f, color)
+        maxLines = 1
+        setAutoSizeTextTypeUniformWithConfiguration(7, 12, 1, TypedValue.COMPLEX_UNIT_SP)
         if (icon != null) {
-            val size = Deco.dpi(c, 18)
+            val size = Deco.dpi(c, if (compact) 16 else 18)
             val tint = if (style == Style.PRIMARY) KeyDrawable.INK else Deco.AMBER_LIGHT
             setCompoundDrawablesRelative(IconDrawable(icon, tint, c).apply { setBounds(0, 0, size, size) }, null, null, null)
-            compoundDrawablePadding = Deco.dpi(c, 10)
+            compoundDrawablePadding = Deco.dpi(c, 8)
         }
         gravity = Gravity.CENTER
         val inset = if (style == Style.PRIMARY) Deco.keyInset(c) else 0
-        minHeight = Deco.dpi(c, 52) + 2 * inset
-        setPadding(Deco.dpi(c, 22) + inset, inset, Deco.dpi(c, 22) + inset, inset)
+        minHeight = Deco.dpi(c, if (compact) 44 else 52) + 2 * inset
+        setPadding(Deco.dpi(c, 14) + inset, inset, Deco.dpi(c, 14) + inset, inset)
         background = when (style) {
             Style.PRIMARY -> Deco.key(c, -1f)
             Style.SECONDARY -> Deco.glassPressable(c, -1f)
@@ -316,8 +324,8 @@ object Kit {
             trackInactiveTintList = ColorStateList.valueOf(Deco.BORDER_STRONG)
             thumbTintList = ColorStateList.valueOf(Deco.AMBER_LIGHT)
             haloTintList = ColorStateList.valueOf(Deco.KEY_GLASS_HI)
-            // A squircle thumb, like every other shape (if the slider won't take it, its own round one stays).
-            runCatching { setCustomThumbDrawable(SquircleDrawable(0xFFF6E3CB.toInt(), 0, 0f, Deco.dp(c, 5.5f))) }
+            // A rounded-square thumb, like every other shape (if the slider won't take it, its own round one stays).
+            runCatching { setCustomThumbDrawable(RoundedDrawable(0xFFF6E3CB.toInt(), 0, 0f, Deco.dp(c, 5.5f))) }
                 .onFailure { com.fujiapp.remote.util.AppLog.add("slider thumb: ${it.message}") }
             addOnChangeListener { _, v, fromUser ->
                 valueText.text = format(v)

@@ -21,7 +21,7 @@ class RecipesScreen(private val a: MainActivity) {
 
     val view: View = Kit.column(c).apply {
         addView(switcher.view, Kit.lp().apply {
-            leftMargin = Deco.dpi(c, Kit.PAGE_MARGIN); rightMargin = Deco.dpi(c, Kit.PAGE_MARGIN); topMargin = Deco.dpi(c, 14)
+            leftMargin = Deco.dpi(c, Kit.PAGE_MARGIN); rightMargin = Deco.dpi(c, Kit.PAGE_MARGIN); topMargin = Deco.dpi(c, 10)
         })
         addView(frame, Kit.lp(h = 0, weight = 1f))
     }

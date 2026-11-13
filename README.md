@@ -153,12 +153,13 @@ rim that's brightest at the corners that catch the light. The glass picks up the
 behind it (the moving key light and ceiling lamps), faintly, and its rim warms a little where the
 key light falls.
 
-**Everything is a squircle**: continuous corners as iOS draws them (Figma's 60% corner
-smoothing), not circular arcs, kept tight: cards 13 dp, tiles 11, buttons, chips and the switch 12,
-the tab bar 20. Small actions are small squares of glass with full squircle corners; the key action
-of a screen is solid amber; on/off settings are switches; a segmented control switches sections
-(Camera / Library / Lab, the Lab's five groups), the chosen one a lighter pane. Only the shutter
-(a camera's round button) and the status lamps are round.
+**Rounded squares, kept tight**: cards 13 dp, tiles 11, buttons, chips and the switch 12, the
+tab bar 20; small actions are small squares of glass with fuller corners. The key action of a
+screen is solid amber; on/off settings are switches; button labels stay on one line, shrinking to
+fit. A segmented control switches sections and filters (Camera / Library / Lab, the Lab's five
+groups, the Library's All / Film stocks / Cinema / My recipes), the chosen one a lighter pane.
+Only the shutter (a camera's round button) and the status lamps are round. In the Lab the preview
+is kept short (150–200 dp) so the settings under it have room.
 
 The **tab bar floats** over the page, the chosen tab a lighter pane. Status lights are small lamps
 with a glow, the remote's exposure scale is a row of thin marks with the value lit, Equipment shows

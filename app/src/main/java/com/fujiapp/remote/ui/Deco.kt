@@ -82,14 +82,14 @@ object Deco {
     fun dp(c: Context, v: Float): Float = v * c.resources.displayMetrics.density
     fun dpi(c: Context, v: Int): Int = Math.round(dp(c, v.toFloat()))
 
-    /** A squircle box with an optional 1dp border (stroke = 0 for none). */
+    /** A rounded box with an optional 1dp border (stroke = 0 for none). */
     fun box(c: Context, fill: Int, stroke: Int, radiusDp: Float): Drawable =
-        SquircleDrawable(fill, stroke, if (stroke != 0) Math.max(1f, dp(c, 1f)) else 0f, dp(c, radiusDp))
+        RoundedDrawable(fill, stroke, if (stroke != 0) Math.max(1f, dp(c, 1f)) else 0f, dp(c, radiusDp))
 
     /**
      * Liquid glass (see [GlassDrawable]): a pane of the night that lets the stage through and picks
      * up its light, a sheen along the top, grain, and a rim warm where the key light falls.
-     * Always a squircle: [radiusDp] < 0 takes a control's corner (12 dp).
+     * Rounded corners: [radiusDp] < 0 takes a control's corner (12 dp).
      */
     fun glass(c: Context, radiusDp: Float, tone: GlassDrawable.Tone = GlassDrawable.Tone.PANE, pressed: Boolean = false): Drawable =
         GlassDrawable(c, if (radiusDp < 0) -1f else dp(c, radiusDp), tone = tone, pressed = pressed)
@@ -98,7 +98,7 @@ object Deco {
     fun glassPressable(c: Context, radiusDp: Float, tone: GlassDrawable.Tone = GlassDrawable.Tone.PANE): Drawable =
         pressable(glass(c, radiusDp, tone), glass(c, radiusDp, tone, pressed = true))
 
-    /** A bubble: a small square of glass with full squircle corners; pressed, it takes the key light. */
+    /** A bubble: a small square of glass with full rounded corners; pressed, it takes the key light. */
     @Suppress("UNUSED_PARAMETER") // the size comes from the bounds
     fun bubble(c: Context, sizeDp: Float, pressed: Boolean = false): Drawable =
         GlassDrawable(c, 0f, round = true, pressed = pressed)
@@ -113,7 +113,7 @@ object Deco {
     /** A status lamp with its glow: give the view about three times the lamp's size. */
     fun led(color: Int): Drawable = LedDrawable(color)
 
-    /** Something that's on: a touch of the key light on a squircle of glass, a key edge and a soft glow outside it. */
+    /** Something that's on: a touch of the key light on a pane of glass, a key edge and a soft glow outside it. */
     fun lit(c: Context, radiusDp: Float, pressed: Boolean = false): Drawable =
         Lit(dp(c, radiusDp), dp(c, Lit.INSET_DP), dp(c, 1f), if (pressed) KEY_GLASS_HI else KEY_GLASS)
 
@@ -145,7 +145,7 @@ object Deco {
             val pic = picture ?: createBitmap(b.width(), b.height()).also { bmp ->
                 val c = Canvas(bmp)
                 val r = RectF(inset, inset, b.width() - inset, b.height() - inset)
-                val shape = android.graphics.Path().also { squirclePath(it, r, radius) }
+                val shape = android.graphics.Path().also { roundedPath(it, r, radius) }
                 val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     style = Paint.Style.STROKE
                     strokeWidth = inset * 0.9f
@@ -163,7 +163,7 @@ object Deco {
                 p.strokeWidth = line
                 p.color = KEY_EDGE
                 val h = line / 2
-                val edge = android.graphics.Path().also { squirclePath(it, RectF(r.left + h, r.top + h, r.right - h, r.bottom - h), radius - h) }
+                val edge = android.graphics.Path().also { roundedPath(it, RectF(r.left + h, r.top + h, r.right - h, r.bottom - h), radius - h) }
                 c.drawPath(edge, p)
                 picture = bmp
             }
