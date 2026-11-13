@@ -19,13 +19,13 @@ class CameraRecipes(private val a: MainActivity) {
     private val c = a
     private val source = Kit.text(c, null, 14f, Deco.MUTED)
     private val progress = Kit.progress(c)
-    private val read = Kit.button(c, "Read from camera", Kit.Style.SECONDARY) { a.session.readRecipes() }
-    private val save = Kit.button(c, "Save as backup", Kit.Style.QUIET) { a.askBackupName(fromRecipes = true) }
+    private val read = Kit.button(c, "Read from camera", Kit.Style.SECONDARY, LineIcon.Kind.BLUETOOTH) { a.session.readRecipes() }
+    private val save = Kit.button(c, "Save as backup", Kit.Style.QUIET, LineIcon.Kind.ARCHIVE) { a.askBackupName(fromRecipes = true) }
     private val slots = Kit.column(c)
     private var shownKey: Any? = null
     private val usbSlots = Kit.column(c)
     private val usbStatus = Kit.text(c, null, 14f, Deco.MUTED)
-    private val usbRead = Kit.button(c, "Read all settings over USB", Kit.Style.SECONDARY) { a.recipeFlow.readSlotsOverUsb() }
+    private val usbRead = Kit.button(c, "Read all settings over USB", Kit.Style.SECONDARY, LineIcon.Kind.DOWNLOAD) { a.recipeFlow.readSlotsOverUsb() }
     private var usbShown: Any? = null
 
     val view: View = Kit.page(c, Kit.column(c).apply {
@@ -132,7 +132,7 @@ class CameraRecipes(private val a: MainActivity) {
             if (i > 0) addView(Kit.hairline(c))
             addView(Kit.readout(c, label, value))
         }
-        addView(Kit.button(c, "Open in Lab", Kit.Style.QUIET) { a.recipeFlow.openInLab(recipe) }, Kit.lp(top = Deco.dpi(c, 8)))
+        addView(Kit.button(c, "Open in Lab", Kit.Style.QUIET, LineIcon.Kind.LAB) { a.recipeFlow.openInLab(recipe) }, Kit.lp(top = Deco.dpi(c, 8)))
     }
 
     private var backupLookup: Pair<String?, Int>? = null

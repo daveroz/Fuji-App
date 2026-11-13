@@ -23,7 +23,7 @@ class ConnectScreen(private val a: MainActivity) {
     private val status = Kit.text(c, null, 15f, Deco.TEXT_SOFT)
     private val progress = Kit.progress(c)
     private val art = CameraView(c, lit = false)
-    private val find = Kit.button(c, "Find camera") { a.onFindPressed() }
+    private val find = Kit.button(c, "Find camera", icon = LineIcon.Kind.BLUETOOTH) { a.onFindPressed() }
     private val pairedTitle = Kit.sectionTitle(c, "Paired cameras")
     private val paired = Kit.column(c)
     private val foundTitle = Kit.sectionTitle(c, "Nearby")
@@ -141,8 +141,8 @@ class StatusScreen(private val a: MainActivity) {
         addView(remoteCard)
         addView(sections)
         addView(Kit.row(c).apply {
-            addView(Kit.button(c, "Refresh", Kit.Style.SECONDARY) { a.session.refreshAll() }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
-            addView(Kit.button(c, "Disconnect", Kit.Style.QUIET) { a.session.disconnect() }, Kit.lp(0, weight = 1f))
+            addView(Kit.button(c, "Refresh", Kit.Style.SECONDARY, LineIcon.Kind.REFRESH) { a.session.refreshAll() }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
+            addView(Kit.button(c, "Disconnect", Kit.Style.QUIET, LineIcon.Kind.CLOSE) { a.session.disconnect() }, Kit.lp(0, weight = 1f))
         }, Kit.lp(top = Deco.dpi(c, 28)))
     })
 

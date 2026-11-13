@@ -299,42 +299,56 @@ class WifiSession(context: Context, private val camera: CameraSession) {
             while (isActive) {
                 val (code, params) = w.nextEvent() ?: break
                 AppLog.add("remote: event 0x%04X %s".format(code, params.joinToString(",") { "0x%X".format(it) }))
-                // After a shot the camera offers its preview and waits for it: fetch it (and show it).
-                if (code == FujiWifi.EVENT_PREVIEW_AVAILABLE && params.isNotEmpty()) {
-                    val handle = params[0]
-                    val size = params.getOrNull(2)
-                    scope.launch { fetchPostview(w, handle, size) }
-                }
+                // The shot is done (PTP CaptureComplete): talk to the camera again, as XApp does.
+                if (code == FujiWifi.EVENT_CAPTURE_COMPLETE) scope.launch { captureDone("capture complete") }
             }
         }
         // The camera's dials win over the app: follow them as they turn (XApp polls the same list).
         pollJob = scope.launch {
             var n = 0
+            var failures = 0
             while (isActive && _phase.value == WifiPhase.Remote) {
                 delay(POLL_MS)
-                runCatching { refreshReadings(full = ++n % FULL_EVERY == 0) }.onFailure { AppLog.add("remote: poll failed: ${it.message}") }
+                // XApp stops polling for the length of a shot (PausePolling / ResumePolling): asking
+                // the camera anything while it saves a picture can leave it stuck.
+                if (_capturing.value) continue
+                val ok = runCatching { refreshReadings(full = ++n % FULL_EVERY == 0) }
+                    .onFailure { AppLog.add("remote: poll failed: ${it.message}") }.isSuccess
+                failures = if (ok) 0 else failures + 1
+                if (failures >= DEAD_AFTER) {
+                    fail("remote", IOException("The connection to the camera's Wi-Fi was lost."))
+                    break
+                }
             }
         }
     }
 
-    private val _postview = MutableStateFlow<Bitmap?>(null)
-    /** The picture just taken, shown for a moment over the live view. */
-    val postview: StateFlow<Bitmap?> = _postview.asStateFlow()
-
-    private suspend fun fetchPostview(w: FujiWifi, handle: Int, size: Int?) {
-        val bytes = io.withLock { withContext(Dispatchers.IO) { runCatching { w.postview(handle, size) }.getOrNull() } }
-        if (bytes == null) {
-            AppLog.add("wifi: the camera didn't hand over the shot's preview")
+    /** Take a picture over Wi-Fi; if the camera won't, use the Bluetooth release. */
+    fun shoot() {
+        if (_capturing.value) {
+            _note.value = "Still saving the last picture."
             return
         }
-        val bmp = withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) } ?: return
-        _postview.value = bmp
-        delay(POSTVIEW_MS)
-        if (_postview.value === bmp) _postview.value = null
+        // Held from here until the camera says the shot is done, as XApp holds its shutter.
+        _capturing.value = true
+        _note.value = "Taking the picture…"
+        capture()
     }
 
-    /** Take a picture over Wi-Fi; if the camera won't, use the Bluetooth release. */
-    fun shoot() = remote("shoot") { w ->
+    private val _capturing = MutableStateFlow(false)
+    /** A picture is being taken and saved: the camera is left alone until it's done. */
+    val capturing: StateFlow<Boolean> = _capturing.asStateFlow()
+    private var captureWatch: Job? = null
+
+    private fun captureDone(why: String) {
+        if (!_capturing.value) return
+        captureWatch?.cancel()
+        _capturing.value = false
+        AppLog.add("wifi: shot finished ($why)")
+        _note.value = "Picture taken."
+    }
+
+    private fun capture() = remote("shoot", whileCapturing = true) { w ->
         val code = w.capture()
         AppLog.add("wifi: capture -> ${Ptp.responseName(code)}")
         // The shot ends the half press on the camera's side; letting go of it again mid-shot can
@@ -342,8 +356,15 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         _focused.value = false
         if (code == Ptp.OK) {
             lastCapture = System.currentTimeMillis()
-            _note.value = "Picture taken."
-        } else if (camera.isConnected) {
+            // If the camera never says it's done, carry on after a while anyway.
+            captureWatch = scope.launch {
+                delay(CAPTURE_TIMEOUT_MS)
+                captureDone("no word from the camera in ${CAPTURE_TIMEOUT_MS / 1000} s")
+            }
+            return@remote
+        }
+        _capturing.value = false
+        if (camera.isConnected) {
             withContext(Dispatchers.Main) { camera.shutterPress(); camera.shutterRelease(shoot = true) }
             _note.value = "Taken with the Bluetooth release."
         } else {
@@ -386,18 +407,25 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         }
     }
 
-    private fun remote(what: String, action: suspend (FujiWifi) -> Unit) {
+    private fun remote(what: String, whileCapturing: Boolean = false, action: suspend (FujiWifi) -> Unit) {
         val w = wifi ?: return
         if (_phase.value != WifiPhase.Remote) return
+        if (_capturing.value && !whileCapturing) {
+            _note.value = "Wait for the picture to be saved."
+            return
+        }
         AppLog.ui("remote: $what")
         scope.launch {
             try {
                 io.withLock { withContext(Dispatchers.IO) { action(w) } }
-                refreshReadings(full = false)
+                if (!_capturing.value) refreshReadings(full = false)
             } catch (c: CancellationException) {
                 throw c
             } catch (t: Throwable) {
                 AppLog.error("remote $what", t)
+                _capturing.value = false
+                // A connection that's gone stays gone: end the page rather than fail every tap.
+                if (t is java.net.SocketException) fail("remote", IOException("The connection to the camera's Wi-Fi was lost."))
             }
         }
     }
@@ -592,12 +620,15 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         val events = eventJob
         eventJob = null
         _frame.value = null
-        _postview.value = null
         // A camera left in the middle of a shot (or cut off before it heard goodbye) can hang until
         // its battery comes out: let a fresh shot finish, end the session over the network, and
         // only then let Android drop the camera's Wi-Fi.
-        val wait = (lastCapture + CAPTURE_SETTLE_MS - System.currentTimeMillis()).coerceIn(0, CAPTURE_SETTLE_MS)
+        val pending = _capturing.value
+        val wait = if (pending) (lastCapture + CAPTURE_TIMEOUT_MS - System.currentTimeMillis()).coerceIn(CAPTURE_SETTLE_MS, CAPTURE_TIMEOUT_MS)
+        else (lastCapture + CAPTURE_SETTLE_MS - System.currentTimeMillis()).coerceIn(0, CAPTURE_SETTLE_MS)
         lastCapture = 0L
+        captureWatch?.cancel()
+        _capturing.value = false
         val network = join
         scope.launch(Dispatchers.IO) {
             if (w != null) {
@@ -638,7 +669,10 @@ class WifiSession(context: Context, private val camera: CameraSession) {
         private const val JOIN_RETRY_WITHIN_MS = 20_000L
         /** How long a picture takes to finish (write, review) before the session may end. */
         private const val CAPTURE_SETTLE_MS = 6_000L
-        private const val POSTVIEW_MS = 2_000L
+        /** XApp waits for the camera's word after a shot; past this the app carries on. */
+        private const val CAPTURE_TIMEOUT_MS = 30_000L
+        /** Polls failing in a row before the connection counts as lost. */
+        private const val DEAD_AFTER = 3
         const val USB_PLUGGED = "The camera is connected by USB, and won't start its Wi-Fi like that. Unplug the cable, then try again."
         /** Every this many polls, read the shown properties directly too. */
         private const val FULL_EVERY = 10

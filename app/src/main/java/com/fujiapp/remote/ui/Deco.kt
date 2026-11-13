@@ -41,6 +41,14 @@ object Deco {
     const val GLASS = 0xB80A0F16.toInt()
     /** A well inside glass: darker, still see-through. */
     const val WELL = 0x8C05070B.toInt()
+    /** Glass, top to bottom: lit edge, body, depth; its rim and sheen. */
+    const val GLASS_TOP = 0xA61A2333.toInt()
+    const val GLASS_DEEP = 0xC405080D.toInt()
+    const val GLASS_RIM = 0x33C8DCFF
+    const val SHEEN = 0x14FFFFFF
+    /** A bubble's pooled light and its depth. */
+    const val BUBBLE_LIGHT = 0x4D3A4A60
+    const val BUBBLE_DEEP = 0xCC0A0F18.toInt()
     // hairlines: a cool white at low strength, an edge of light rather than a line of paint
     const val BORDER_SOFT = 0x14AADCFF
     const val BORDER = 0x1FAADCFF
@@ -82,8 +90,32 @@ object Deco {
         if (stroke != 0) setStroke(Math.max(1, Math.round(dp(c, 1f))), stroke)
     }
 
-    /** A glass panel: the night at 72% with a hairline edge. */
-    fun glass(c: Context, radiusDp: Float): GradientDrawable = box(c, GLASS, BORDER, radiusDp)
+    /**
+     * Glass: a pane of the night, lighter at its top edge as if lit from the ceiling, deeper at the
+     * bottom, with a hairline rim and a soft sheen across the top third. The haze shows through.
+     */
+    fun glass(c: Context, radiusDp: Float): Drawable {
+        val r = dp(c, radiusDp)
+        val base = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(GLASS_TOP, GLASS, GLASS_DEEP)).apply {
+            cornerRadius = r
+            setStroke(Math.max(1, Math.round(dp(c, 1f))), GLASS_RIM)
+        }
+        val sheen = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(SHEEN, 0, 0)).apply { cornerRadius = r }
+        return android.graphics.drawable.LayerDrawable(arrayOf(base, sheen))
+    }
+
+    /**
+     * A bubble: a round glass button, its light pooled up and to the left like a drop of glass,
+     * with a hairline rim; pressed, it takes the key light.
+     */
+    fun bubble(c: Context, sizeDp: Float, pressed: Boolean = false): Drawable = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        gradientType = GradientDrawable.RADIAL_GRADIENT
+        gradientRadius = dp(c, sizeDp * 0.8f)
+        setGradientCenter(0.35f, 0.25f)
+        colors = if (pressed) intArrayOf(0x66EB9438, 0x40241A10) else intArrayOf(BUBBLE_LIGHT, BUBBLE_DEEP)
+        setStroke(Math.max(1, Math.round(dp(c, 1f))), if (pressed) AMBER else GLASS_RIM)
+    }
 
     /** Something that's on: a touch of the key light on the glass, a key edge and a soft glow outside it. */
     fun lit(c: Context, radiusDp: Float, pressed: Boolean = false): Drawable =

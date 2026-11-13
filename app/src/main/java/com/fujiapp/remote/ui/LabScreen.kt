@@ -196,8 +196,8 @@ class LabScreen(private val a: MainActivity) {
             addView(controls, FrameLayout.LayoutParams(Kit.MATCH, Kit.WRAP))
         }, Kit.lp(h = 0, weight = 1f).apply { topMargin = Deco.dpi(c, 4) })
         addView(Kit.row(c).apply {
-            addView(Kit.button(c, "Load into a slot") { a.recipeFlow.load(recipe) }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 8) })
-            addView(Kit.button(c, "Save", Kit.Style.SECONDARY) { a.recipeFlow.saveMine(recipe) }, Kit.lp(Kit.WRAP))
+            addView(Kit.button(c, "Load into a slot", icon = LineIcon.Kind.UPLOAD) { a.recipeFlow.load(recipe) }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 8) })
+            addView(Kit.button(c, "Save", Kit.Style.SECONDARY, LineIcon.Kind.CHECK) { a.recipeFlow.saveMine(recipe) }, Kit.lp(Kit.WRAP))
         }, Kit.lp(top = Deco.dpi(c, 8)))
     }
 
@@ -288,7 +288,7 @@ class LabScreen(private val a: MainActivity) {
     private fun same(x: Recipe, y: Recipe) = x.copy(name = "") == y.copy(name = "")
 
     private fun small(title: String, onClick: () -> Unit): View =
-        Kit.button(c, title, Kit.Style.QUIET, onClick).apply { minWidth = 0; minimumWidth = 0; setPadding(Deco.dpi(c, 10), 0, Deco.dpi(c, 10), 0) }
+        Kit.button(c, title, Kit.Style.QUIET, onClick = onClick).apply { minWidth = 0; minimumWidth = 0; setPadding(Deco.dpi(c, 10), 0, Deco.dpi(c, 10), 0) }
 
     private fun group(vararg views: View): View = Kit.column(c).apply { views.forEach { addView(it) } }
 

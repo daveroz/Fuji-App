@@ -8,6 +8,7 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.fujiapp.remote.wifi.CardPhoto
@@ -24,8 +25,8 @@ class PhotosScreen(private val a: MainActivity) {
     private val selected = LinkedHashSet<Int>()
     // Chosen pictures are imported even if they were before (a damaged copy can be replaced);
     // "Newest 10" skips the ones already on the phone.
-    private val importSelected = Kit.button(c, "Download selected") { importNow(selectedPhotos(), again = true) }
-    private val importNewest = Kit.button(c, "Newest 10", Kit.Style.SECONDARY) { importNow(a.wifi.photos.value.take(10).map { it.photo }, again = false) }
+    private val importSelected = Kit.button(c, "Download selected", icon = LineIcon.Kind.DOWNLOAD) { importNow(selectedPhotos(), again = true) }
+    private val importNewest = Kit.button(c, "Newest 10", Kit.Style.SECONDARY, LineIcon.Kind.DOWNLOAD) { importNow(a.wifi.photos.value.take(10).map { it.photo }, again = false) }
     private val more = Kit.button(c, "Load more", Kit.Style.QUIET) { a.wifi.loadMore() }
     private var shown: List<CardPhoto>? = null
 
@@ -35,7 +36,7 @@ class PhotosScreen(private val a: MainActivity) {
                 addView(Kit.label(c, "Over Wi-Fi", Deco.DIM))
                 addView(Kit.text(c, "Photos", 30f), Kit.lp(top = Deco.dpi(c, 10)))
             }, Kit.lp(0, weight = 1f))
-            addView(Kit.button(c, "Close", Kit.Style.QUIET) { a.closeCameraPage() })
+            addView(Kit.iconButton(c, LineIcon.Kind.CLOSE, "Close") { a.closeCameraPage() })
         }, Kit.lp(top = Deco.dpi(c, 4)))
         addView(status, Kit.lp(top = Deco.dpi(c, 14)))
         addView(progress, Kit.lp(top = Deco.dpi(c, 10)))
@@ -146,27 +147,48 @@ class RemoteScreen(private val a: MainActivity) {
         visibility = View.GONE
         contentDescription = "The picture just taken"
     }
+    /** "Saving", over the live view while the camera finishes a shot. */
+    private val saving = Kit.label(c, "Saving…", Deco.AMBER_LIGHT, 11f).apply {
+        gravity = Gravity.CENTER
+        background = Deco.box(c, 0x99000000.toInt(), Deco.AMBER, 16f)
+        setPadding(Deco.dpi(c, 16), Deco.dpi(c, 8), Deco.dpi(c, 16), Deco.dpi(c, 8))
+        visibility = View.GONE
+    }
+    /** The live view set into its glass card: an even glass margin, rounded to match. */
     private val frame = FrameLayout(c).apply {
-        background = Deco.box(c, 0xFF000000.toInt(), Deco.BORDER_SOFT, 16f)
-        outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
-        clipToOutline = true
-        addView(live, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
-        addView(postview, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
-        addView(marker, FrameLayout.LayoutParams(Deco.dpi(c, MARKER_DP), Deco.dpi(c, MARKER_DP)))
+        background = Deco.glass(c, Layouts.CARD_RADIUS)
+        val pad = Deco.dpi(c, 6)
+        setPadding(pad, pad, pad, pad)
+        addView(FrameLayout(c).apply {
+            background = Deco.box(c, 0xFF000000.toInt(), 0, Layouts.CARD_RADIUS - 6f)
+            outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+            clipToOutline = true
+            addView(live, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
+            addView(postview, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
+            addView(marker, FrameLayout.LayoutParams(Deco.dpi(c, MARKER_DP), Deco.dpi(c, MARKER_DP)))
+            addView(saving, FrameLayout.LayoutParams(Kit.WRAP, Kit.WRAP, Gravity.CENTER))
+        }, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
     }
 
     // The readout (Hasselblad rear screen).
     private val topLine = Kit.label(c, "", Deco.MUTED, 9f)
     private val battery = Kit.label(c, "", Deco.MUTED, 9f).apply { gravity = Gravity.END }
-    private val apertureValue = big()
-    private val shutterValue = big().apply { gravity = Gravity.END }
+    private val apertureValue = big().apply { gravity = Gravity.CENTER }
+    private val shutterValue = big().apply { gravity = Gravity.CENTER }
     private val isoValue = Kit.label(c, "", Deco.TEXT_SOFT, 11f).apply { gravity = Gravity.END }
     private val evScale = EvScale(c)
     private val evValue = Kit.label(c, "EV 0", Deco.TEXT_SOFT, 9f)
     private val modeValue = Kit.text(c, "—", 22f, Deco.TEXT, bold = true)
-    private val shotsValue = Kit.text(c, "", 15f, Deco.TEXT_SOFT, bold = true).apply { gravity = Gravity.END }
-    private val apertureSteps = steps({ a.wifi.stepAperture(false) }, { a.wifi.stepAperture(true) }, "aperture")
-    private val shutterSteps = steps({ a.wifi.stepShutter(false) }, { a.wifi.stepShutter(true) }, "shutter speed")
+    private val shotsValue = Kit.text(c, "", 15f, Deco.TEXT_SOFT, bold = true).apply {
+        gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        val size = Deco.dpi(c, 16)
+        setCompoundDrawablesRelative(IconDrawable(LineIcon.Kind.SHOTS, Deco.MUTED, c).apply { setBounds(0, 0, size, size) }, null, null, null)
+        compoundDrawablePadding = Deco.dpi(c, 8)
+    }
+    private val apertureDown = Kit.iconButton(c, LineIcon.Kind.CHEVRON_LEFT, "Smaller aperture number") { a.wifi.stepAperture(false) }
+    private val apertureUp = Kit.iconButton(c, LineIcon.Kind.CHEVRON_RIGHT, "Larger aperture number") { a.wifi.stepAperture(true) }
+    private val shutterDown = Kit.iconButton(c, LineIcon.Kind.CHEVRON_LEFT, "Slower shutter speed") { a.wifi.stepShutter(false) }
+    private val shutterUp = Kit.iconButton(c, LineIcon.Kind.CHEVRON_RIGHT, "Faster shutter speed") { a.wifi.stepShutter(true) }
     /** In place of the steps when the camera picks the value (its mode, or a dial on A). */
     private val apertureAuto = autoBadge()
     private val shutterAuto = autoBadge()
@@ -178,7 +200,7 @@ class RemoteScreen(private val a: MainActivity) {
     private val timerTile = Layouts.Tile(c, LineIcon.Kind.TIMER, "Timer") { pickSetting(FujiWifi.SELF_TIMER, "Self-timer") }
     private val isoTile = Layouts.Tile(c, LineIcon.Kind.ISO, "ISO") { pickIso() }
 
-    private val focusButton = Kit.button(c, "Focus", Kit.Style.SECONDARY) {
+    private val focusButton = Kit.button(c, "Focus", Kit.Style.SECONDARY, LineIcon.Kind.FOCUS) {
         if (a.wifi.focused.value) a.wifi.releaseFocus() else {
             placeMarker(null)
             a.wifi.focus()
@@ -186,6 +208,7 @@ class RemoteScreen(private val a: MainActivity) {
     }
     private var shownReadings: Map<String, String>? = null
     private var markerAt: Pair<Float, Float>? = null
+    private val shutterButton by lazy { shutter() }
 
     val view: View = Kit.page(c, Kit.column(c).apply {
         addView(Kit.row(c).apply {
@@ -194,7 +217,7 @@ class RemoteScreen(private val a: MainActivity) {
                 addView(Kit.label(c, "Over Wi-Fi", Deco.DIM))
                 addView(Layouts.wideTitle(c, "Remote", 20f), Kit.lp(top = Deco.dpi(c, 6)))
             }, Kit.lp(0, weight = 1f))
-            addView(Kit.button(c, "Close", Kit.Style.QUIET) { a.closeCameraPage() })
+            addView(Kit.iconButton(c, LineIcon.Kind.CLOSE, "Close") { a.closeCameraPage() })
         })
         addView(status, Kit.lp(top = Deco.dpi(c, 4)))
         addView(progress, Kit.lp(top = Deco.dpi(c, 4)))
@@ -205,32 +228,24 @@ class RemoteScreen(private val a: MainActivity) {
                 addView(topLine, Kit.lp(0, weight = 1f))
                 addView(battery, Kit.lp(Kit.WRAP))
             })
-            addView(Kit.row(c).apply {
-                gravity = Gravity.BOTTOM
-                addView(Kit.column(c).apply {
-                    addView(apertureValue)
-                    addView(FrameLayout(c).apply {
-                        addView(apertureSteps)
-                        addView(apertureAuto, FrameLayout.LayoutParams(Kit.WRAP, Kit.WRAP, Gravity.CENTER_VERTICAL or Gravity.START))
-                    }, Kit.lp(top = Deco.dpi(c, 6)))
-                }, Kit.lp(0, weight = 1f))
-                addView(Kit.column(c).apply {
-                    gravity = Gravity.END
-                    addView(shutterValue, Kit.lp(Kit.MATCH))
-                    addView(FrameLayout(c).apply {
-                        addView(shutterSteps, FrameLayout.LayoutParams(Kit.WRAP, Kit.WRAP, Gravity.END))
-                        addView(shutterAuto, FrameLayout.LayoutParams(Kit.WRAP, Kit.WRAP, Gravity.CENTER_VERTICAL or Gravity.END))
-                    }, Kit.lp(Kit.MATCH).apply { topMargin = Deco.dpi(c, 6) })
-                }, Kit.lp(0, weight = 1f))
-            }, Kit.lp(top = Deco.dpi(c, 2)))
+            // Aperture and shutter speed side by side, each with its steps beside it (or AUTO under it).
             addView(Kit.row(c).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                addView(chevron("‹", "Less exposure") { a.wifi.stepExposure(false) })
+                addView(valueGroup(apertureValue, apertureDown, apertureUp, apertureAuto), Kit.lp(0, weight = 1f))
+                addView(View(c).apply { setBackgroundColor(Deco.BORDER_SOFT) }, LinearLayout.LayoutParams(maxOf(1, Deco.dpi(c, 1)), Deco.dpi(c, 56)).apply {
+                    marginStart = Deco.dpi(c, 6)
+                    marginEnd = Deco.dpi(c, 6)
+                })
+                addView(valueGroup(shutterValue, shutterDown, shutterUp, shutterAuto), Kit.lp(0, weight = 1f))
+            }, Kit.lp(top = Deco.dpi(c, 8)))
+            addView(Kit.row(c).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                addView(Kit.iconButton(c, LineIcon.Kind.CHEVRON_LEFT, "Less exposure") { a.wifi.stepExposure(false) })
                 addView(Kit.column(c).apply {
                     addView(evScale, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 18)))
                     addView(evValue, Kit.lp(top = Deco.dpi(c, 2)))
                 }, Kit.lp(0, weight = 1f))
-                addView(chevron("›", "More exposure") { a.wifi.stepExposure(true) })
+                addView(Kit.iconButton(c, LineIcon.Kind.CHEVRON_RIGHT, "More exposure") { a.wifi.stepExposure(true) })
                 addView(isoValue, Kit.lp(Kit.WRAP).apply { marginStart = Deco.dpi(c, 10) })
             }, Kit.lp(top = Deco.dpi(c, 4)))
             addView(Kit.hairline(c), Kit.lp(top = Deco.dpi(c, 6)))
@@ -244,7 +259,7 @@ class RemoteScreen(private val a: MainActivity) {
         addView(Kit.row(c).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(focusButton, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 16) })
-            addView(shutter(), LinearLayout.LayoutParams(Deco.dpi(c, 72), Deco.dpi(c, 72)))
+            addView(shutterButton, LinearLayout.LayoutParams(Deco.dpi(c, 72), Deco.dpi(c, 72)))
         }, Kit.lp(top = Deco.dpi(c, 10)))
     })
 
@@ -257,26 +272,25 @@ class RemoteScreen(private val a: MainActivity) {
         }
     }
 
-    private fun big() = Kit.text(c, "—", 32f, Deco.TEXT, bold = true).apply { maxLines = 1 }
-
-    /** A round step button, big enough for a thumb (44 dp). */
-    private fun chevron(t: String, description: String, onClick: () -> Unit): View = Kit.text(c, t, 24f, Deco.AMBER_LIGHT, bold = true).apply {
-        gravity = Gravity.CENTER
-        includeFontPadding = false
-        background = Deco.pressable(Deco.box(c, Deco.WELL, Deco.BORDER_STRONG, 22f), Deco.box(c, Deco.KEY_GLASS_HI, Deco.AMBER, 22f))
-        isClickable = true
-        isFocusable = true
-        contentDescription = description
-        setOnClickListener {
-            performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
-            onClick()
-        }
-        layoutParams = LinearLayout.LayoutParams(Deco.dpi(c, STEP_DP), Deco.dpi(c, STEP_DP))
+    private fun big() = Kit.text(c, "—", 28f, Deco.TEXT, bold = true).apply {
+        maxLines = 1
+        // Between its two steps the value shrinks rather than wraps (1/4000 is long).
+        setAutoSizeTextTypeUniformWithConfiguration(16, 28, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
     }
 
-    private fun steps(down: () -> Unit, up: () -> Unit, what: String): View = Kit.row(c).apply {
-        addView(chevron("‹", "Lower $what", down))
-        addView(chevron("›", "Higher $what", up), LinearLayout.LayoutParams(Deco.dpi(c, STEP_DP), Deco.dpi(c, STEP_DP)).apply { marginStart = Deco.dpi(c, 10) })
+    /**
+     * A value with its steps beside it: ‹ f/2.2 ›. When the camera picks the value, the steps give
+     * way to an AUTO badge under it.
+     */
+    private fun valueGroup(value: android.widget.TextView, down: View, up: View, auto: View): View = Kit.column(c).apply {
+        gravity = Gravity.CENTER_HORIZONTAL
+        addView(Kit.row(c).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(down)
+            addView(value, Kit.lp(0, weight = 1f))
+            addView(up)
+        }, Kit.lp())
+        addView(auto, Kit.lp(Kit.WRAP).apply { topMargin = Deco.dpi(c, 4) })
     }
 
     /** "AUTO", lit: the camera picks this value. */
@@ -363,10 +377,7 @@ class RemoteScreen(private val a: MainActivity) {
         if (frame != null) live.setImageBitmap(frame)
     }
 
-    fun showPostview(shot: Bitmap?) {
-        if (shot != null) postview.setImageBitmap(shot)
-        postview.isVisible = shot != null
-    }
+
 
     fun render() {
         val w = a.wifi
@@ -391,10 +402,16 @@ class RemoteScreen(private val a: MainActivity) {
         val exposureMode = w.currentValue(FujiWifi.SHOOTING_MODE)
         val shutterIsAuto = exposureMode == 2L || exposureMode == 3L
         val apertureIsAuto = exposureMode == 2L || exposureMode == 4L
-        shutterSteps.isVisible = !shutterIsAuto
+        shutterDown.isInvisible = shutterIsAuto
+        shutterUp.isInvisible = shutterIsAuto
         shutterAuto.isVisible = shutterIsAuto
-        apertureSteps.isVisible = !apertureIsAuto
+        apertureDown.isInvisible = apertureIsAuto
+        apertureUp.isInvisible = apertureIsAuto
         apertureAuto.isVisible = apertureIsAuto
+        // While a shot saves the camera is left alone (as XApp does): say so on the picture.
+        val capturing = w.capturing.value
+        saving.isVisible = capturing
+        shutterButton.alpha = if (capturing) 0.4f else 1f
         val focused = w.focused.value
         focusButton.text = if (focused) "Let go of focus" else "Focus"
         if (focused) marker.alpha = 1f else if (!ready) marker.isVisible = false

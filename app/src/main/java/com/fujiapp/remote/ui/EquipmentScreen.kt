@@ -17,7 +17,7 @@ class EquipmentScreen(private val a: MainActivity) {
     private val life = FrameLayout(c)
     private val status = Kit.text(c, null, 14f, Deco.MUTED)
     private val progress = Kit.progress(c)
-    private val read = Kit.button(c, "Read from camera", Kit.Style.SECONDARY) { a.session.fetchVitals() }
+    private val read = Kit.button(c, "Read from camera", Kit.Style.SECONDARY, LineIcon.Kind.REFRESH) { a.session.fetchVitals() }
     private val sections = Kit.column(c)
 
     val view: View = Kit.page(c, Kit.column(c).apply {

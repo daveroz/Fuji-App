@@ -124,9 +124,15 @@ object Kit {
     enum class Style { PRIMARY, SECONDARY, QUIET }
 
     /** A button: lit (primary), glass (secondary) or text only (quiet). */
-    fun button(c: Context, title: String, style: Style = Style.PRIMARY, onClick: () -> Unit) = TextView(c).apply {
+    fun button(c: Context, title: String, style: Style = Style.PRIMARY, icon: LineIcon.Kind? = null, onClick: () -> Unit) = TextView(c).apply {
         text = title
-        Deco.label(c, this, 12f, if (style == Style.PRIMARY) Deco.AMBER_LIGHT else if (style == Style.SECONDARY) Deco.TEXT_SOFT else Deco.MUTED)
+        val color = if (style == Style.PRIMARY) Deco.AMBER_LIGHT else if (style == Style.SECONDARY) Deco.TEXT_SOFT else Deco.MUTED
+        Deco.label(c, this, 12f, color)
+        if (icon != null) {
+            val size = Deco.dpi(c, 18)
+            setCompoundDrawablesRelative(IconDrawable(icon, color, c).apply { setBounds(0, 0, size, size) }, null, null, null)
+            compoundDrawablePadding = Deco.dpi(c, 10)
+        }
         gravity = Gravity.CENTER
         minHeight = Deco.dpi(c, 52)
         val inset = if (style == Style.PRIMARY) Deco.dpi(c, Deco.Lit.INSET_DP.toInt()) else 0
@@ -140,6 +146,22 @@ object Kit {
         isFocusable = true
         setOnClickListener { onClick() }
     }
+
+    /** A round glass bubble with an icon: for steps, closing, small actions (44 dp, thumb-sized). */
+    fun iconButton(c: Context, icon: LineIcon.Kind, description: String, sizeDp: Int = 44, onClick: () -> Unit): View =
+        LineIcon(c, icon, Deco.AMBER_LIGHT).apply {
+            val pad = Deco.dpi(c, sizeDp) * 3 / 10
+            setPadding(pad, pad, pad, pad)
+            background = Deco.pressable(Deco.bubble(c, sizeDp.toFloat()), Deco.bubble(c, sizeDp.toFloat(), pressed = true))
+            isClickable = true
+            isFocusable = true
+            contentDescription = description
+            setOnClickListener {
+                performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                onClick()
+            }
+            layoutParams = LinearLayout.LayoutParams(Deco.dpi(c, sizeDp), Deco.dpi(c, sizeDp))
+        }
 
     fun setEnabled(v: View, enabled: Boolean) {
         v.isEnabled = enabled
@@ -215,7 +237,7 @@ object Kit {
             chips.forEachIndexed { i, chip ->
                 val on = i == index
                 chip.setTextColor(if (on) Deco.AMBER_LIGHT else Deco.MUTED)
-                chip.background = if (on) Deco.lit(ctx, 19f) else Deco.box(ctx, Deco.WELL, Deco.BORDER, 16f)
+                chip.background = if (on) Deco.lit(ctx, 19f) else Deco.glass(ctx, 19f)
                 chip.setPadding(inset + Deco.dpi(ctx, 10), inset, inset + Deco.dpi(ctx, 10), inset)
             }
         }

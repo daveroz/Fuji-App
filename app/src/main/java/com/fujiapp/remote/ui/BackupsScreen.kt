@@ -18,7 +18,7 @@ class BackupsScreen(private val a: MainActivity) {
     }
 
     private val c = a
-    private val backupButton = Kit.button(c, "Back up camera settings") { a.askBackupName() }
+    private val backupButton = Kit.button(c, "Back up camera settings", icon = LineIcon.Kind.ARCHIVE) { a.askBackupName() }
     private val progress = Kit.progress(c)
     private val status = Kit.text(c, null, 14f, Deco.MUTED)
     private val list = Kit.column(c)
@@ -122,11 +122,11 @@ class BackupsScreen(private val a: MainActivity) {
                     addView(Layouts.field(c, "SIZE", Formatter.formatShortFileSize(c, meta.size.toLong()), end = true), Kit.lp(Kit.WRAP).apply { marginStart = Deco.dpi(c, 12) })
                 }, Kit.lp(top = Deco.dpi(c, 14)))
                 addView(Kit.row(c).apply {
-                    val restore = Kit.button(c, "Restore", Kit.Style.SECONDARY) { a.confirmRestore(meta) }
+                    val restore = Kit.button(c, "Restore", Kit.Style.SECONDARY, LineIcon.Kind.UPLOAD) { a.confirmRestore(meta) }
                     Kit.setEnabled(restore, restoreAllowed)
                     addView(restore, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 8) })
-                    addView(Kit.button(c, "Share", Kit.Style.QUIET) { a.shareBackup(meta) })
-                    addView(Kit.button(c, "Delete", Kit.Style.QUIET) { a.confirmDelete(meta) })
+                    addView(Kit.iconButton(c, LineIcon.Kind.SHARE, "Share") { a.shareBackup(meta) }, LinearLayout.LayoutParams(Deco.dpi(c, 44), Deco.dpi(c, 44)).apply { marginEnd = Deco.dpi(c, 8) })
+                    addView(Kit.iconButton(c, LineIcon.Kind.TRASH, "Delete") { a.confirmDelete(meta) })
                 }, Kit.lp(top = Deco.dpi(c, 14)))
             }, Kit.lp(bottom = Deco.dpi(c, 12)))
         }

@@ -87,11 +87,11 @@ class LibraryScreen(private val a: MainActivity) {
                 if (!expanded.remove(item.id)) expanded.add(item.id)
                 refresh()
             }, Kit.lp(Kit.WRAP))
-            addView(Kit.button(c, "Lab", Kit.Style.SECONDARY) { a.recipeFlow.openInLab(item.recipe) }, Kit.lp(0, weight = 1f).apply { marginStart = Deco.dpi(c, 8) })
-            addView(Kit.button(c, "Load") { a.recipeFlow.load(item.recipe) }, Kit.lp(0, weight = 1f).apply { marginStart = Deco.dpi(c, 8) })
+            addView(Kit.button(c, "Lab", Kit.Style.SECONDARY, LineIcon.Kind.LAB) { a.recipeFlow.openInLab(item.recipe) }, Kit.lp(0, weight = 1f).apply { marginStart = Deco.dpi(c, 8) })
+            addView(Kit.button(c, "Load", icon = LineIcon.Kind.UPLOAD) { a.recipeFlow.load(item.recipe) }, Kit.lp(0, weight = 1f).apply { marginStart = Deco.dpi(c, 8) })
         }, Kit.lp(top = Deco.dpi(c, 14)))
         if (item.group == LibraryRecipe.Group.MINE) {
-            addView(Kit.button(c, "Delete", Kit.Style.QUIET) { a.recipeFlow.deleteMine(item) }, Kit.lp(top = Deco.dpi(c, 6)))
+            addView(Kit.button(c, "Delete", Kit.Style.QUIET, LineIcon.Kind.TRASH) { a.recipeFlow.deleteMine(item) }, Kit.lp(top = Deco.dpi(c, 6)))
         }
     }
 

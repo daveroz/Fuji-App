@@ -76,10 +76,10 @@ class SettingsScreen(private val a: MainActivity) {
                 14f, Deco.MUTED,
             )
         )
-        addView(Kit.button(c, "Save log to Downloads") { a.saveLog() }, Kit.lp(top = Deco.dpi(c, 16)))
+        addView(Kit.button(c, "Save log to Downloads", icon = LineIcon.Kind.DOWNLOAD) { a.saveLog() }, Kit.lp(top = Deco.dpi(c, 16)))
         addView(Kit.row(c).apply {
-            addView(Kit.button(c, "Share log", Kit.Style.SECONDARY) { a.shareLog() }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
-            addView(Kit.button(c, "Clear log", Kit.Style.QUIET) { a.confirmClearLog() }, Kit.lp(0, weight = 1f))
+            addView(Kit.button(c, "Share log", Kit.Style.SECONDARY, LineIcon.Kind.SHARE) { a.shareLog() }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
+            addView(Kit.button(c, "Clear log", Kit.Style.QUIET, LineIcon.Kind.TRASH) { a.confirmClearLog() }, Kit.lp(0, weight = 1f))
         }, Kit.lp(top = Deco.dpi(c, 10)))
 
         addView(Kit.sectionTitle(c, "About"))

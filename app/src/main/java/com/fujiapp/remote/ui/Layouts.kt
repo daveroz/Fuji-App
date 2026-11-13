@@ -11,6 +11,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.fujiapp.remote.ui.LineIcon.Kind
 
 /**
  * Layout pieces after the references (Hasselblad's app and camera screens, Leica's control grid):
@@ -70,7 +71,7 @@ object Layouts {
         }
         private val box = Kit.column(c).apply {
             gravity = Gravity.CENTER
-            background = Deco.pressable(Deco.box(c, Deco.WELL, Deco.BORDER, 12f), Deco.box(c, Deco.SURFACE_HI, Deco.BORDER_STRONG, 12f))
+            background = Deco.pressable(Deco.glass(c, 18f), Deco.lit(c, 18f, pressed = true))
             setPadding(Deco.dpi(c, 4), Deco.dpi(c, 8), Deco.dpi(c, 4), Deco.dpi(c, 6))
             addView(LineIcon(c, icon), LinearLayout.LayoutParams(Deco.dpi(c, 22), Deco.dpi(c, 22)))
             addView(valueText, Kit.lp(top = Deco.dpi(c, 4)))
@@ -165,16 +166,15 @@ object Layouts {
     }
 }
 
-/** A thin line icon in the app's amber, drawn in code (no artwork). */
-@SuppressLint("ViewConstructor") // made in code only
-class LineIcon(c: Context, private val kind: Kind, color: Int = Deco.AMBER_LIGHT) : View(c) {
-    enum class Kind { SHOTS, POWER, WIFI, CHIP, FILM, WB, FLASH, TIMER, FOCUS, ISO, BATTERY, MACRO, GAUGE, ARCHIVE, GEAR }
-
-    /** The line colour (the tab bar dims the icons it isn't on). */
-    var tint: Int = color
+/**
+ * The app's icon set: thin round-capped lines in one colour, drawn in code (no artwork), so they stay
+ * crisp at any size and take any tint. Used as a view ([LineIcon]) or inside buttons ([IconDrawable]).
+ */
+class IconDrawable(private val kind: LineIcon.Kind, color: Int, private val context: Context) : android.graphics.drawable.Drawable() {
+    var lineColor: Int = color
         set(value) {
             field = value
-            invalidate()
+            invalidateSelf()
         }
 
     private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -185,13 +185,16 @@ class LineIcon(c: Context, private val kind: Kind, color: Int = Deco.AMBER_LIGHT
     private val r = RectF()
     private val path = Path()
 
-    override fun onDraw(canvas: Canvas) {
-        val w = width.toFloat()
-        val h = height.toFloat()
+    override fun draw(canvas: Canvas) {
+        val b = bounds
+        val w = b.width().toFloat()
+        val h = b.height().toFloat()
+        if (w <= 0f || h <= 0f) return
         val s = minOf(w, h)
-        val cx = w / 2
-        val cy = h / 2
-        p.color = tint
+        val cx = b.left + w / 2
+        val cy = b.top + h / 2
+        p.color = lineColor
+        p.alpha = alphaValue
         p.strokeWidth = maxOf(1.5f, s * 0.07f)
         p.style = Paint.Style.STROKE
         when (kind) {
@@ -316,6 +319,120 @@ class LineIcon(c: Context, private val kind: Kind, color: Int = Deco.AMBER_LIGHT
                     )
                 }
             }
+            Kind.CHEVRON_LEFT -> {
+                canvas.drawLine(cx + s * 0.12f, cy - s * 0.28f, cx - s * 0.16f, cy, p)
+                canvas.drawLine(cx - s * 0.16f, cy, cx + s * 0.12f, cy + s * 0.28f, p)
+            }
+            Kind.CHEVRON_RIGHT -> {
+                canvas.drawLine(cx - s * 0.12f, cy - s * 0.28f, cx + s * 0.16f, cy, p)
+                canvas.drawLine(cx + s * 0.16f, cy, cx - s * 0.12f, cy + s * 0.28f, p)
+            }
+            Kind.CLOSE -> {
+                canvas.drawLine(cx - s * 0.24f, cy - s * 0.24f, cx + s * 0.24f, cy + s * 0.24f, p)
+                canvas.drawLine(cx + s * 0.24f, cy - s * 0.24f, cx - s * 0.24f, cy + s * 0.24f, p)
+            }
+            Kind.PLUS -> {
+                canvas.drawLine(cx - s * 0.28f, cy, cx + s * 0.28f, cy, p)
+                canvas.drawLine(cx, cy - s * 0.28f, cx, cy + s * 0.28f, p)
+            }
+            Kind.MINUS -> canvas.drawLine(cx - s * 0.28f, cy, cx + s * 0.28f, cy, p)
+            Kind.CHECK -> {
+                canvas.drawLine(cx - s * 0.28f, cy + s * 0.02f, cx - s * 0.08f, cy + s * 0.22f, p)
+                canvas.drawLine(cx - s * 0.08f, cy + s * 0.22f, cx + s * 0.3f, cy - s * 0.22f, p)
+            }
+            Kind.REFRESH -> {
+                r.set(cx - s * 0.32f, cy - s * 0.32f, cx + s * 0.32f, cy + s * 0.32f)
+                canvas.drawArc(r, -60f, 300f, false, p)
+                val ax = cx + s * 0.16f
+                val ay = cy - s * 0.28f
+                canvas.drawLine(ax, ay, ax + s * 0.16f, ay - s * 0.06f, p)
+                canvas.drawLine(ax, ay, ax + s * 0.06f, ay + s * 0.15f, p)
+            }
+            Kind.SHARE -> {
+                canvas.drawLine(cx, cy + s * 0.1f, cx, cy - s * 0.4f, p)
+                canvas.drawLine(cx, cy - s * 0.4f, cx - s * 0.14f, cy - s * 0.26f, p)
+                canvas.drawLine(cx, cy - s * 0.4f, cx + s * 0.14f, cy - s * 0.26f, p)
+                path.reset()
+                path.moveTo(cx - s * 0.14f, cy - s * 0.12f)
+                path.lineTo(cx - s * 0.32f, cy - s * 0.12f)
+                path.lineTo(cx - s * 0.32f, cy + s * 0.4f)
+                path.lineTo(cx + s * 0.32f, cy + s * 0.4f)
+                path.lineTo(cx + s * 0.32f, cy - s * 0.12f)
+                path.lineTo(cx + s * 0.14f, cy - s * 0.12f)
+                canvas.drawPath(path, p)
+            }
+            Kind.TRASH -> {
+                canvas.drawLine(cx - s * 0.34f, cy - s * 0.26f, cx + s * 0.34f, cy - s * 0.26f, p)
+                canvas.drawLine(cx - s * 0.1f, cy - s * 0.4f, cx + s * 0.1f, cy - s * 0.4f, p)
+                path.reset()
+                path.moveTo(cx - s * 0.26f, cy - s * 0.26f)
+                path.lineTo(cx - s * 0.2f, cy + s * 0.4f)
+                path.lineTo(cx + s * 0.2f, cy + s * 0.4f)
+                path.lineTo(cx + s * 0.26f, cy - s * 0.26f)
+                canvas.drawPath(path, p)
+            }
+            Kind.DOWNLOAD, Kind.UPLOAD -> {
+                val down = kind == Kind.DOWNLOAD
+                val tip = if (down) cy + s * 0.14f else cy - s * 0.36f
+                val tail = if (down) cy - s * 0.36f else cy + s * 0.14f
+                canvas.drawLine(cx, tail, cx, tip, p)
+                val back = if (down) -s * 0.16f else s * 0.16f
+                canvas.drawLine(cx, tip, cx - s * 0.16f, tip + back, p)
+                canvas.drawLine(cx, tip, cx + s * 0.16f, tip + back, p)
+                canvas.drawLine(cx - s * 0.34f, cy + s * 0.38f, cx + s * 0.34f, cy + s * 0.38f, p)
+            }
+            Kind.APERTURE -> {
+                canvas.drawCircle(cx, cy, s * 0.4f, p)
+                for (k in 0 until 6) {
+                    val a = Math.toRadians(k * 60.0)
+                    val a2 = Math.toRadians(k * 60.0 + 100.0)
+                    canvas.drawLine(
+                        cx + Math.cos(a).toFloat() * s * 0.4f, cy + Math.sin(a).toFloat() * s * 0.4f,
+                        cx + Math.cos(a2).toFloat() * s * 0.16f, cy + Math.sin(a2).toFloat() * s * 0.16f, p,
+                    )
+                }
+            }
+            Kind.BLUETOOTH -> {
+                path.reset()
+                path.moveTo(cx - s * 0.2f, cy - s * 0.18f)
+                path.lineTo(cx + s * 0.18f, cy + s * 0.18f)
+                path.lineTo(cx, cy + s * 0.4f)
+                path.lineTo(cx, cy - s * 0.4f)
+                path.lineTo(cx + s * 0.18f, cy - s * 0.18f)
+                path.lineTo(cx - s * 0.2f, cy + s * 0.18f)
+                canvas.drawPath(path, p)
+            }
+            Kind.LOG -> {
+                r.set(cx - s * 0.3f, cy - s * 0.4f, cx + s * 0.3f, cy + s * 0.4f)
+                canvas.drawRoundRect(r, s * 0.06f, s * 0.06f, p)
+                for (k in -1..1) canvas.drawLine(cx - s * 0.16f, cy + k * s * 0.16f, cx + s * 0.16f, cy + k * s * 0.16f, p)
+            }
+            Kind.PIN -> {
+                canvas.drawCircle(cx, cy - s * 0.12f, s * 0.12f, p)
+                path.reset()
+                path.moveTo(cx, cy + s * 0.42f)
+                path.cubicTo(cx - s * 0.5f, cy - s * 0.05f, cx - s * 0.22f, cy - s * 0.45f, cx, cy - s * 0.42f)
+                path.cubicTo(cx + s * 0.22f, cy - s * 0.45f, cx + s * 0.5f, cy - s * 0.05f, cx, cy + s * 0.42f)
+                canvas.drawPath(path, p)
+            }
+            Kind.LAB -> {
+                path.reset()
+                path.moveTo(cx - s * 0.1f, cy - s * 0.4f)
+                path.lineTo(cx - s * 0.1f, cy - s * 0.08f)
+                path.lineTo(cx - s * 0.34f, cy + s * 0.36f)
+                path.lineTo(cx + s * 0.34f, cy + s * 0.36f)
+                path.lineTo(cx + s * 0.1f, cy - s * 0.08f)
+                path.lineTo(cx + s * 0.1f, cy - s * 0.4f)
+                canvas.drawPath(path, p)
+                canvas.drawLine(cx - s * 0.2f, cy + s * 0.16f, cx + s * 0.2f, cy + s * 0.16f, p)
+            }
+            Kind.LIBRARY -> {
+                for (k in 0..2) {
+                    val x = cx - s * 0.3f + k * s * 0.2f
+                    canvas.drawLine(x, cy - s * 0.36f, x, cy + s * 0.36f, p)
+                }
+                canvas.drawLine(cx + s * 0.16f, cy - s * 0.34f, cx + s * 0.36f, cy + s * 0.34f, p)
+            }
             Kind.MACRO -> {
                 for (k in 0 until 5) {
                     val a = Math.toRadians(k * 72.0 - 90)
@@ -324,6 +441,44 @@ class LineIcon(c: Context, private val kind: Kind, color: Int = Deco.AMBER_LIGHT
                 canvas.drawLine(cx, cy + s * 0.16f, cx, cy + s * 0.44f, p)
             }
         }
+    }
+
+    private var alphaValue = 255
+    override fun setAlpha(alpha: Int) {
+        alphaValue = alpha
+        invalidateSelf()
+    }
+
+    override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+        p.colorFilter = colorFilter
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+}
+
+/** An icon from the set as a view; it draws inside its padding, so a bubble background can frame it. */
+@SuppressLint("ViewConstructor") // made in code only
+class LineIcon(c: Context, kind: Kind, color: Int = Deco.AMBER_LIGHT) : View(c) {
+    enum class Kind {
+        SHOTS, POWER, WIFI, CHIP, FILM, WB, FLASH, TIMER, FOCUS, ISO, BATTERY, MACRO, GAUGE, ARCHIVE, GEAR,
+        CHEVRON_LEFT, CHEVRON_RIGHT, CLOSE, PLUS, MINUS, REFRESH, SHARE, TRASH, DOWNLOAD, UPLOAD, APERTURE,
+        BLUETOOTH, LOG, PIN, LAB, LIBRARY, CHECK,
+    }
+
+    private val icon = IconDrawable(kind, color, c)
+
+    /** The line colour (the tab bar dims the icons it isn't on). */
+    var tint: Int
+        get() = icon.lineColor
+        set(value) {
+            icon.lineColor = value
+            invalidate()
+        }
+
+    override fun onDraw(canvas: Canvas) {
+        icon.setBounds(paddingLeft, paddingTop, width - paddingRight, height - paddingBottom)
+        icon.draw(canvas)
     }
 }
 

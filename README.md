@@ -117,8 +117,11 @@ while its Wi-Fi is on; the app reconnects Bluetooth directly when you close Phot
   that moment (Fujifilm's settings list, `0x902B`, as XApp reads it). A
   setting the camera doesn't offer (film simulation while a custom setting decides it, say) isn't
   listed, and every change is read back.
-  Tapping the live view focuses there, on the camera's own focus grid. Closing waits for a picture
-  just taken to finish and ends the session properly before Android drops the camera's network.
+  Tapping the live view focuses there, on the camera's own focus grid. Taking a picture works as
+  in XApp: the app stops asking the camera anything until it reports the shot complete (PTP
+  CaptureComplete, `0x400D`), the shutter waits until then, and closing waits for it too, then ends
+  the session properly before Android drops the camera's network. A connection that dies ends the
+  page instead of failing every tap.
 
 While the camera is plugged in by USB it answers Bluetooth backups with "busy" and won't start its
 Wi-Fi, so the app says so and asks you to unplug it instead of retrying.
@@ -141,7 +144,9 @@ says so once and suggests turning Location sync off.
 
 ### Layout
 
-Cards with rounded corners hold everything, each detail's label above its value, two to a line
+Glass cards (lighter at the top edge, a soft sheen, a hairline rim) and round glass bubbles for
+small actions; an icon set of thin round-capped lines drawn in code, on the tab bar, the buttons
+and the tiles. Cards with rounded corners hold everything, each detail's label above its value, two to a line
 (after the flight-booking and Hasselblad references); backups and library recipes are ticket-style
 cards with a tear line; buttons are pills; the tab bar has line icons. The palette, the haze, the
 ceiling lights, the grain and the type stay the app's own.

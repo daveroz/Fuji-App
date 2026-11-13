@@ -199,14 +199,11 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     merge(
                         session.state, session.vitals, session.backup, session.restore, session.recipes, transfer.state,
-                        wifi.phase, wifi.photos, wifi.progress, wifi.readings, wifi.focused, wifi.note,
+                        wifi.phase, wifi.photos, wifi.progress, wifi.readings, wifi.focused, wifi.note, wifi.capturing,
                     ).collect { render() }
                 }
                 launch {
                     wifi.frame.collect { if (cameraPage == CameraPage.REMOTE) remoteScreen.showFrame(it) }
-                }
-                launch {
-                    wifi.postview.collect { remoteScreen.showPostview(it) }
                 }
                 launch {
                     session.notice.collect { message ->
@@ -246,8 +243,12 @@ class MainActivity : AppCompatActivity() {
                 addView(Kit.label(c, "Log", Deco.TEXT_SOFT, 11f).apply {
                     gravity = Gravity.CENTER
                     minWidth = Deco.dpi(c, 64)
-                    minHeight = Deco.dpi(c, 38)
-                    background = Deco.pressable(Deco.glass(c, 19f), Deco.box(c, Deco.SURFACE_HI, Deco.BORDER_STRONG, 19f))
+                    minHeight = Deco.dpi(c, 40)
+                    setPadding(Deco.dpi(c, 14), 0, Deco.dpi(c, 16), 0)
+                    val size = Deco.dpi(c, 16)
+                    setCompoundDrawablesRelative(IconDrawable(LineIcon.Kind.LOG, Deco.AMBER_LIGHT, c).apply { setBounds(0, 0, size, size) }, null, null, null)
+                    compoundDrawablePadding = Deco.dpi(c, 8)
+                    background = Deco.pressable(Deco.glass(c, 20f), Deco.lit(c, 20f, pressed = true))
                     isClickable = true
                     contentDescription = "Save the log to Downloads"
                     setOnClickListener { saveLog() }
