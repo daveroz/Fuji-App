@@ -1,7 +1,6 @@
 package com.fujiapp.remote.ui
 
 import android.annotation.SuppressLint
-import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -100,13 +99,14 @@ class ConnectScreen(private val a: MainActivity) {
     }
 
     private fun cameraRow(title: String, subtitle: String, onClick: () -> Unit): View = Kit.row(c).apply {
-        background = Deco.pressable(Deco.glass(c, 18f), Deco.box(c, Deco.SURFACE_HI, Deco.BORDER_STRONG, 18f))
-        setPadding(Deco.dpi(c, 18), Deco.dpi(c, 16), Deco.dpi(c, 18), Deco.dpi(c, 16))
+        background = Deco.glassPressable(c, 16f)
+        setPadding(Deco.dpi(c, 18), Deco.dpi(c, 16), Deco.dpi(c, 14), Deco.dpi(c, 16))
+        addView(Kit.iconSquare(c, LineIcon.Kind.SHOTS))
         addView(Kit.column(c).apply {
             addView(Kit.text(c, title, 16f, Deco.TEXT, bold = true))
-            addView(Kit.text(c, subtitle, 13f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 6)))
+            addView(Kit.text(c, subtitle, 12f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 6)))
         }, Kit.lp(0, weight = 1f))
-        addView(Kit.text(c, ">", 18f, Deco.DIM)) // Carbon+ has no ›
+        addView(LineIcon(c, LineIcon.Kind.CHEVRON_RIGHT, Deco.DIM), LinearLayout.LayoutParams(Deco.dpi(c, 20), Deco.dpi(c, 20)))
         isClickable = true
         setOnClickListener { onClick() }
         layoutParams = Kit.lp(bottom = Deco.dpi(c, 10))
@@ -135,8 +135,8 @@ class StatusScreen(private val a: MainActivity) {
             addView(strip, Kit.lp(top = Deco.dpi(c, 14)))
         }, Kit.lp(top = Deco.dpi(c, 2)))
         addView(Kit.row(c).apply {
-            addView(tile("Photos", "Browse and download over Wi-Fi") { a.openCameraPage(MainActivity.CameraPage.PHOTOS) }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
-            addView(tile("Remote", "Live view, exposure, shutter") { a.openCameraPage(MainActivity.CameraPage.REMOTE) }, Kit.lp(0, weight = 1f))
+            addView(tile("Photos", "Browse · download", LineIcon.Kind.PHOTOS, GlassDrawable.Tone.PANE) { a.openCameraPage(MainActivity.CameraPage.PHOTOS) }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
+            addView(tile("Remote", "Live view · shutter", LineIcon.Kind.REMOTE, GlassDrawable.Tone.WARM) { a.openCameraPage(MainActivity.CameraPage.REMOTE) }, Kit.lp(0, weight = 1f))
         }, Kit.lp(top = Deco.dpi(c, 12)))
         addView(remoteCard)
         addView(sections)
@@ -147,12 +147,16 @@ class StatusScreen(private val a: MainActivity) {
     })
 
     init {
-        remoteCard.addView(Kit.sectionTitle(c, "Remote release"))
-        remoteCard.addView(Kit.panel(c, padV = 18).apply {
-            gravity = Gravity.CENTER_HORIZONTAL
-            addView(shutterButton(), LinearLayout.LayoutParams(Deco.dpi(c, 92), Deco.dpi(c, 92)))
-            addView(Kit.label(c, "Hold to focus · release to shoot", Deco.DIM, 10f).apply { gravity = Gravity.CENTER }, Kit.lp(top = Deco.dpi(c, 14)))
-        })
+        // The Bluetooth release: one card, the shutter on its right.
+        remoteCard.addView(Kit.row(c).apply {
+            background = Deco.glass(c, Layouts.CARD_RADIUS)
+            setPadding(Deco.dpi(c, 18), Deco.dpi(c, 12), Deco.dpi(c, 12), Deco.dpi(c, 12))
+            addView(Kit.column(c).apply {
+                addView(Kit.label(c, "Remote release", Deco.MUTED, 10f))
+                addView(Kit.text(c, "Hold to focus, let go to shoot.", 13f, Deco.TEXT_SOFT), Kit.lp(top = Deco.dpi(c, 8)))
+            }, Kit.lp(0, weight = 1f))
+            addView(shutterButton(), LinearLayout.LayoutParams(Deco.dpi(c, 72), Deco.dpi(c, 72)))
+        }, Kit.lp(top = Deco.dpi(c, 12)))
     }
 
     private var shown: Pair<ConnState.Connected, VitalsState>? = null
@@ -190,17 +194,13 @@ class StatusScreen(private val a: MainActivity) {
         s.sections().forEach { sections.addView(Kit.sectionPanel(c, it)) }
     }
 
-    /** A panel to go somewhere, like Hasselblad's "Discover": the title set wide, a line, an arrow. */
-    private fun tile(title: String, detail: String, onClick: () -> Unit): View = Kit.column(c).apply {
-        background = Deco.pressable(Deco.glass(c, Layouts.CARD_RADIUS), Deco.box(c, Deco.SURFACE_HI, Deco.BORDER_STRONG, Layouts.CARD_RADIUS))
-        setPadding(Deco.dpi(c, 16), Deco.dpi(c, 14), Deco.dpi(c, 16), Deco.dpi(c, 14))
-        addView(Kit.row(c).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            addView(Kit.label(c, title, Deco.AMBER_LIGHT, 12f), Kit.lp(0, weight = 1f))
-            addView(Kit.text(c, "→", 16f, Deco.AMBER_LIGHT))
-        })
-        addView(Kit.hairline(c), Kit.lp(top = Deco.dpi(c, 10)))
-        addView(Kit.text(c, detail, 12f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 10)))
+    /** A card to go somewhere: its icon glowing, the name, what it's for. */
+    private fun tile(title: String, detail: String, icon: LineIcon.Kind, tone: GlassDrawable.Tone, onClick: () -> Unit): View = Kit.column(c).apply {
+        background = Deco.glassPressable(c, 16f, tone)
+        setPadding(Deco.dpi(c, 16), Deco.dpi(c, 16), Deco.dpi(c, 16), Deco.dpi(c, 16))
+        addView(LineIcon(c, icon, Deco.AMBER_LIGHT), LinearLayout.LayoutParams(Deco.dpi(c, 26), Deco.dpi(c, 26)))
+        addView(Kit.text(c, title, 16f, Deco.TEXT), Kit.lp(top = Deco.dpi(c, 14)))
+        addView(Kit.label(c, detail, Deco.DIM, 8f), Kit.lp(top = Deco.dpi(c, 6)))
         isClickable = true
         contentDescription = title
         setOnClickListener { onClick() }
@@ -209,16 +209,8 @@ class StatusScreen(private val a: MainActivity) {
     /** A round shutter: amber ring, lit while held. Half press on touch, full press on release. */
     @SuppressLint("ClickableViewAccessibility")
     private fun shutterButton(): View {
-        val ring = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(Deco.KEY_GLASS)
-            setStroke(Deco.dpi(c, 2), Deco.AMBER_DEEP)
-        }
-        val held = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(Deco.KEY_GLASS_HI)
-            setStroke(Deco.dpi(c, 3), Deco.AMBER)
-        }
+        val ring = ShutterDrawable(c)
+        val held = ShutterDrawable(c, pressed = true)
         return View(c).apply {
             background = ring
             contentDescription = "Shutter"

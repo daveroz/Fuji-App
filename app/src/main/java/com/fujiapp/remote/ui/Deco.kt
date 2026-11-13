@@ -33,14 +33,14 @@ import androidx.core.graphics.createBitmap
  */
 object Deco {
     // surfaces (darkest to lightest)
-    const val BG = 0xFF05070B.toInt()
-    const val PANEL = 0xFF0B1220.toInt()
-    const val SURFACE = 0xFF0D1422.toInt()
-    const val SURFACE_HI = 0xFF131C2C.toInt()
+    const val BG = 0xFF060708.toInt()
+    const val PANEL = 0xFF0E0F12.toInt()
+    const val SURFACE = 0xFF111215.toInt()
+    const val SURFACE_HI = 0xFF17181C.toInt()
     /** Glass: the night at 72%, over the light. */
-    const val GLASS = 0xB80A0F16.toInt()
+    const val GLASS = 0xCC0F1013.toInt()
     /** A well inside glass: darker, still see-through. */
-    const val WELL = 0x8C05070B.toInt()
+    const val WELL = 0x8C000000.toInt()
     /** Glass, top to bottom: lit edge, body, depth; its rim and sheen. */
     const val GLASS_TOP = 0xA61A2333.toInt()
     const val GLASS_DEEP = 0xC405080D.toInt()
@@ -49,15 +49,15 @@ object Deco {
     /** A bubble's pooled light and its depth. */
     const val BUBBLE_LIGHT = 0x4D3A4A60
     const val BUBBLE_DEEP = 0xCC0A0F18.toInt()
-    // hairlines: a cool white at low strength, an edge of light rather than a line of paint
-    const val BORDER_SOFT = 0x14AADCFF
-    const val BORDER = 0x1FAADCFF
-    const val BORDER_STRONG = 0x38AADCFF
+    // hairlines: white at low strength, an edge of light rather than a line of paint
+    const val BORDER_SOFT = 0x14FFFFFF
+    const val BORDER = 0x1FFFFFFF
+    const val BORDER_STRONG = 0x33FFFFFF
     // text
-    const val TEXT = 0xFFEEF4F8.toInt()
-    const val TEXT_SOFT = 0xFFC9D4DD.toInt()
-    const val MUTED = 0xFF8FA0B3.toInt()
-    const val DIM = 0xFF6F8091.toInt()
+    const val TEXT = 0xFFF2F3F5.toInt()
+    const val TEXT_SOFT = 0xFFCDD0D6.toInt()
+    const val MUTED = 0xFF9EA2AA.toInt()
+    const val DIM = 0xFF6E727B.toInt()
     // the key light
     const val AMBER = 0xFFEB9438.toInt()
     const val AMBER_DEEP = 0xFFC97624.toInt()
@@ -91,31 +91,31 @@ object Deco {
     }
 
     /**
-     * Glass: a pane of the night, lighter at its top edge as if lit from the ceiling, deeper at the
-     * bottom, with a hairline rim and a soft sheen across the top third. The haze shows through.
+     * Liquid glass (see [GlassDrawable]): a pane of the night that lets the stage through and picks
+     * up its light, a sheen along the top, grain, and a rim warm where the key light falls.
+     * [radiusDp] < 0 makes a capsule.
      */
-    fun glass(c: Context, radiusDp: Float): Drawable {
-        val r = dp(c, radiusDp)
-        val base = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(GLASS_TOP, GLASS, GLASS_DEEP)).apply {
-            cornerRadius = r
-            setStroke(Math.max(1, Math.round(dp(c, 1f))), GLASS_RIM)
-        }
-        val sheen = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(SHEEN, 0, 0)).apply { cornerRadius = r }
-        return android.graphics.drawable.LayerDrawable(arrayOf(base, sheen))
-    }
+    fun glass(c: Context, radiusDp: Float, tone: GlassDrawable.Tone = GlassDrawable.Tone.PANE, pressed: Boolean = false): Drawable =
+        GlassDrawable(c, if (radiusDp < 0) -1f else dp(c, radiusDp), tone = tone, pressed = pressed)
 
-    /**
-     * A bubble: a round glass button, its light pooled up and to the left like a drop of glass,
-     * with a hairline rim; pressed, it takes the key light.
-     */
-    fun bubble(c: Context, sizeDp: Float, pressed: Boolean = false): Drawable = GradientDrawable().apply {
-        shape = GradientDrawable.OVAL
-        gradientType = GradientDrawable.RADIAL_GRADIENT
-        gradientRadius = dp(c, sizeDp * 0.8f)
-        setGradientCenter(0.35f, 0.25f)
-        colors = if (pressed) intArrayOf(0x66EB9438, 0x40241A10) else intArrayOf(BUBBLE_LIGHT, BUBBLE_DEEP)
-        setStroke(Math.max(1, Math.round(dp(c, 1f))), if (pressed) AMBER else GLASS_RIM)
-    }
+    /** Glass that's pressed: the key light on it. */
+    fun glassPressable(c: Context, radiusDp: Float, tone: GlassDrawable.Tone = GlassDrawable.Tone.PANE): Drawable =
+        pressable(glass(c, radiusDp, tone), glass(c, radiusDp, tone, pressed = true))
+
+    /** A bubble: a round drop of glass, its light pooled at the top; pressed, it takes the key light. */
+    @Suppress("UNUSED_PARAMETER") // the size comes from the bounds
+    fun bubble(c: Context, sizeDp: Float, pressed: Boolean = false): Drawable =
+        GlassDrawable(c, 0f, round = true, pressed = pressed)
+
+    /** The key action: solid amber, glowing. Text on it is [KeyDrawable.INK]. */
+    fun key(c: Context, radiusDp: Float): Drawable =
+        pressable(KeyDrawable(c, if (radiusDp < 0) -1f else dp(c, radiusDp)), KeyDrawable(c, if (radiusDp < 0) -1f else dp(c, radiusDp), pressed = true))
+
+    /** Room a [key] leaves around itself for its glow. */
+    fun keyInset(c: Context): Int = dpi(c, 4)
+
+    /** A status lamp with its glow: give the view about three times the lamp's size. */
+    fun led(color: Int): Drawable = LedDrawable(color)
 
     /** Something that's on: a touch of the key light on the glass, a key edge and a soft glow outside it. */
     fun lit(c: Context, radiusDp: Float, pressed: Boolean = false): Drawable =

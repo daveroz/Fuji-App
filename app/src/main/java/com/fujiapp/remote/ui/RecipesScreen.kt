@@ -17,7 +17,7 @@ class RecipesScreen(private val a: MainActivity) {
     private val names = listOf("Camera", "Library", "Lab")
     private var current = 0
     private val frame = FrameLayout(c)
-    private val switcher = Kit.Chips(c, names) { select(it) }
+    private val switcher = Kit.Segmented(c, names) { select(it) }
 
     val view: View = Kit.column(c).apply {
         addView(switcher.view, Kit.lp().apply {

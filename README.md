@@ -147,12 +147,22 @@ says so once and suggests turning Location sync off.
 
 ### Layout
 
-Glass cards (lighter at the top edge, a soft sheen, a hairline rim) and round glass bubbles for
-small actions; an icon set of thin round-capped lines drawn in code, on the tab bar, the buttons
-and the tiles. Cards with rounded corners hold everything, each detail's label above its value, two to a line
-(after the flight-booking and Hasselblad references); backups and library recipes are ticket-style
-cards with a tear line; buttons are pills; the tab bar has line icons. The palette, the haze, the
-ceiling lights, the grain and the type stay the app's own.
+**Glass, kept quiet**: cards are charcoal glass that lets a little of the stage through, a touch
+lighter at the top left, deeper at the bottom, with film grain and a hairline rim that's brightest
+at the corners that catch the light. The glass also picks up the stage's own light behind it
+(the moving key light and ceiling lamps), faintly, and its rim warms where the key light falls.
+Corners are **squircles**, continuous curves as iOS draws them (Figma's 60% corner smoothing),
+not circular arcs. Small actions are round glass **bubbles**; the key action of a screen is a
+solid amber pill; on/off settings are switches; choices are glass capsules, and a segmented capsule
+switches sections (Camera / Library / Lab, the Lab's five groups).
+
+The **tab bar floats**: a capsule of denser glass over the page, with the chosen tab in a lighter
+lens. Status lights are small lamps with a glow, the remote's exposure scale is a row of thin
+marks with the value lit, Equipment shows the shutter's actuations as a **ring of 60 lamps** lit to
+the share of its rated life, and backups are dated tickets with their recipes as chips. The
+icon set (thin round-capped lines, drawn in code) runs through the tab bar, buttons, tiles and
+settings rows. While the camera is on Wi-Fi, the header still names it and says how it's reached
+("Remote · Wi-Fi").
 
 ### Look
 

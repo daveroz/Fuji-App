@@ -22,8 +22,10 @@ import com.fujiapp.remote.model.CameraInfo
 /** Small view builders for the Deco look, so every screen is put together the same way. */
 object Kit {
 
-    const val PAGE_MARGIN = 24
-    private const val PANEL_RADIUS = 22f
+    const val PAGE_MARGIN = 20
+    private const val PANEL_RADIUS = 16f
+    /** Room at the foot of a page for the floating tab bar (70 dp and its margin, and a little air). */
+    const val TAB_SPACE = 104
     /** Buttons are pills, like the references' big rounded actions. */
     private const val BUTTON_RADIUS = 26f
 
@@ -123,24 +125,29 @@ object Kit {
 
     enum class Style { PRIMARY, SECONDARY, QUIET }
 
-    /** A button: lit (primary), glass (secondary) or text only (quiet). */
+    /** A button: the amber key (primary), a glass pill (secondary) or text only (quiet). */
     fun button(c: Context, title: String, style: Style = Style.PRIMARY, icon: LineIcon.Kind? = null, onClick: () -> Unit) = TextView(c).apply {
         text = title
-        val color = if (style == Style.PRIMARY) Deco.AMBER_LIGHT else if (style == Style.SECONDARY) Deco.TEXT_SOFT else Deco.MUTED
+        val color = when (style) {
+            Style.PRIMARY -> KeyDrawable.INK
+            Style.SECONDARY -> Deco.TEXT
+            Style.QUIET -> Deco.MUTED
+        }
         Deco.label(c, this, 12f, color)
         if (icon != null) {
             val size = Deco.dpi(c, 18)
-            setCompoundDrawablesRelative(IconDrawable(icon, color, c).apply { setBounds(0, 0, size, size) }, null, null, null)
+            val tint = if (style == Style.PRIMARY) KeyDrawable.INK else Deco.AMBER_LIGHT
+            setCompoundDrawablesRelative(IconDrawable(icon, tint, c).apply { setBounds(0, 0, size, size) }, null, null, null)
             compoundDrawablePadding = Deco.dpi(c, 10)
         }
         gravity = Gravity.CENTER
-        minHeight = Deco.dpi(c, 52)
-        val inset = if (style == Style.PRIMARY) Deco.dpi(c, Deco.Lit.INSET_DP.toInt()) else 0
-        setPadding(Deco.dpi(c, 20) + inset, inset, Deco.dpi(c, 20) + inset, inset)
+        val inset = if (style == Style.PRIMARY) Deco.keyInset(c) else 0
+        minHeight = Deco.dpi(c, 52) + 2 * inset
+        setPadding(Deco.dpi(c, 22) + inset, inset, Deco.dpi(c, 22) + inset, inset)
         background = when (style) {
-            Style.PRIMARY -> Deco.pressable(Deco.lit(c, BUTTON_RADIUS), Deco.lit(c, BUTTON_RADIUS, pressed = true))
-            Style.SECONDARY -> Deco.pressable(Deco.glass(c, BUTTON_RADIUS), Deco.box(c, Deco.SURFACE_HI, Deco.BORDER_STRONG, BUTTON_RADIUS))
-            Style.QUIET -> Deco.pressable(Deco.box(c, 0, 0, BUTTON_RADIUS), Deco.box(c, Deco.GLASS, 0, BUTTON_RADIUS))
+            Style.PRIMARY -> Deco.key(c, -1f)
+            Style.SECONDARY -> Deco.glassPressable(c, -1f)
+            Style.QUIET -> Deco.pressable(Deco.box(c, 0, 0, BUTTON_RADIUS), Deco.glass(c, -1f, GlassDrawable.Tone.WELL))
         }
         isClickable = true
         isFocusable = true
@@ -168,38 +175,77 @@ object Kit {
         v.alpha = if (enabled) 1f else 0.38f
     }
 
-    /** A setting that's on or off: title and explanation on the left, a pill that's lit when on. */
-    class Toggle(c: Context, title: String, detail: String?, private val onChange: (Boolean) -> Unit) {
-        private val pill = label(c, "Off", Deco.DIM, 10f).apply {
-            gravity = Gravity.CENTER
-            minWidth = Deco.dpi(c, 64)
-            minHeight = Deco.dpi(c, 34)
-        }
-        private val ctx = c
+    /** A small amber icon in a rounded square of warm glass, at the start of a settings row. */
+    fun iconSquare(c: Context, icon: LineIcon.Kind): View = LineIcon(c, icon, Deco.AMBER_LIGHT).apply {
+        val pad = Deco.dpi(c, 8)
+        setPadding(pad, pad, pad, pad)
+        background = Deco.glass(c, 9f, GlassDrawable.Tone.LENS)
+        layoutParams = LinearLayout.LayoutParams(Deco.dpi(c, 34), Deco.dpi(c, 34)).apply { marginEnd = Deco.dpi(c, 14) }
+    }
+
+    /** A status lamp: [sizeDp] is the lamp with its glow (the core is about a third of it). */
+    fun led(c: Context, color: Int, sizeDp: Int = 18): View = View(c).apply {
+        background = Deco.led(color)
+        layoutParams = LinearLayout.LayoutParams(Deco.dpi(c, sizeDp), Deco.dpi(c, sizeDp))
+    }
+
+    /** A setting that's on or off: an icon, title and explanation, and a switch. */
+    class Toggle(c: Context, title: String, detail: String?, icon: LineIcon.Kind? = null, private val onChange: (Boolean) -> Unit) {
+        private val switch = GlassSwitch(c)
         var checked = false
             private set
 
         val view: View = row(c).apply {
             setPadding(0, Deco.dpi(c, 14), 0, Deco.dpi(c, 14))
+            if (icon != null) addView(iconSquare(c, icon))
             addView(column(c).apply {
                 addView(text(c, title, 15f, Deco.TEXT))
-                if (detail != null) addView(text(c, detail, 13f, Deco.MUTED), lp(top = Deco.dpi(c, 5)))
+                if (detail != null) addView(text(c, detail, 12f, Deco.MUTED), lp(top = Deco.dpi(c, 5)))
             }, lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 16) })
-            addView(pill, LinearLayout.LayoutParams(WRAP, WRAP))
+            addView(switch, LinearLayout.LayoutParams(WRAP, WRAP))
             isClickable = true
             setOnClickListener { if (isEnabled) onChange(!checked) }
         }
 
         fun set(on: Boolean?) {
             checked = on == true
-            pill.text = when (on) { true -> "On"; false -> "Off"; null -> "—" }
-            pill.setTextColor(if (checked) Deco.AMBER_LIGHT else Deco.DIM)
-            val inset = Deco.dpi(ctx, Deco.Lit.INSET_DP.toInt())
-            pill.background = if (checked) Deco.lit(ctx, 17f) else Deco.box(ctx, Deco.WELL, Deco.BORDER, 14f)
-            pill.setPadding(inset, inset, inset, inset)
+            switch.checked = checked
+            switch.alpha = if (on == null) 0.4f else 1f
         }
 
         fun enable(on: Boolean) = setEnabled(view, on)
+    }
+
+    /**
+     * Choices in a glass capsule (a segmented control): the chosen one sits in a lighter lens with a
+     * small amber light under its name.
+     */
+    class Segmented(c: Context, options: List<String>, private val onPick: (Int) -> Unit) {
+        private val ctx = c
+        private val items = options.mapIndexed { i, o ->
+            label(c, o, Deco.MUTED, 10f).apply {
+                gravity = Gravity.CENTER
+                maxLines = 1
+                setAutoSizeTextTypeUniformWithConfiguration(7, 10, 1, TypedValue.COMPLEX_UNIT_SP)
+                minHeight = Deco.dpi(c, 40)
+                isClickable = true
+                setOnClickListener { onPick(i) }
+            }
+        }
+        val view: View = row(c).apply {
+            background = Deco.glass(c, -1f, GlassDrawable.Tone.WELL)
+            val pad = Deco.dpi(c, 4)
+            setPadding(pad, pad, pad, pad)
+            items.forEach { addView(it, lp(0, weight = 1f)) }
+        }
+
+        fun select(index: Int) {
+            items.forEachIndexed { i, t ->
+                val on = i == index
+                t.setTextColor(if (on) Deco.TEXT else Deco.MUTED)
+                t.background = if (on) SegmentLens(ctx) else null
+            }
+        }
     }
 
     /** A row of choices; the chosen one is lit. */
@@ -237,7 +283,7 @@ object Kit {
             chips.forEachIndexed { i, chip ->
                 val on = i == index
                 chip.setTextColor(if (on) Deco.AMBER_LIGHT else Deco.MUTED)
-                chip.background = if (on) Deco.lit(ctx, 19f) else Deco.glass(ctx, 19f)
+                chip.background = if (on) Deco.lit(ctx, 19f) else Deco.glass(ctx, -1f)
                 chip.setPadding(inset + Deco.dpi(ctx, 10), inset, inset + Deco.dpi(ctx, 10), inset)
             }
         }
@@ -298,16 +344,16 @@ object Kit {
         }
     }
 
-    /** A setting picked from a list: title on the left, the choice on the right; tap to change. */
-    class PickerRow(c: Context, title: String, onClick: () -> Unit) {
-        private val valueText = text(c, "", 14f, Deco.TEXT).apply { gravity = Gravity.END }
+    /** A setting picked from a list: an icon, the title, the choice and a chevron; tap to change. */
+    class PickerRow(c: Context, title: String, icon: LineIcon.Kind? = null, onClick: () -> Unit) {
+        private val valueText = text(c, "", 13f, Deco.MUTED).apply { gravity = Gravity.END }
         val view: View = row(c).apply {
             setPadding(0, Deco.dpi(c, 14), 0, Deco.dpi(c, 14))
-            addView(text(c, title, 14f, Deco.TEXT_SOFT), lp(0, weight = 1f))
+            if (icon != null) addView(iconSquare(c, icon))
+            addView(text(c, title, 15f, Deco.TEXT), lp(0, weight = 1f))
             addView(valueText, lp(Kit.WRAP))
-            addView(text(c, "  >", 14f, Deco.DIM))
+            addView(LineIcon(c, LineIcon.Kind.CHEVRON_RIGHT, Deco.DIM), LinearLayout.LayoutParams(Deco.dpi(c, 18), Deco.dpi(c, 18)).apply { marginStart = Deco.dpi(c, 8) })
             isClickable = true
-            background = Deco.pressable(Deco.box(c, 0, 0, 12f), Deco.box(c, Deco.GLASS, 0, 12f))
             setOnClickListener { onClick() }
         }
 
@@ -338,11 +384,11 @@ object Kit {
         visibility = View.GONE
     }
 
-    /** A scrolling page with the standard margins. */
+    /** A scrolling page with the standard margins; its foot clears the floating tab bar. */
     fun page(c: Context, content: LinearLayout): View = android.widget.ScrollView(c).apply {
         isFillViewport = true
         isVerticalScrollBarEnabled = false
-        content.setPadding(Deco.dpi(c, PAGE_MARGIN), Deco.dpi(c, 8), Deco.dpi(c, PAGE_MARGIN), Deco.dpi(c, 40))
+        content.setPadding(Deco.dpi(c, PAGE_MARGIN), Deco.dpi(c, 8), Deco.dpi(c, PAGE_MARGIN), Deco.dpi(c, TAB_SPACE + 16))
         addView(content, FrameLayout.LayoutParams(MATCH, WRAP))
     }
 

@@ -13,6 +13,7 @@ class SettingsScreen(private val a: MainActivity) {
     private val syncTime: Kit.Toggle = Kit.Toggle(
         c, "Set the camera clock",
         "When the camera asks, send the phone's date, time and time zone (as XApp does).",
+        LineIcon.Kind.TIMER,
     ) { on ->
         a.session.setSyncTime(on)
         syncTimeSet(on)
@@ -22,15 +23,16 @@ class SettingsScreen(private val a: MainActivity) {
         c, "Location sync",
         "The camera asks for the phone's location every few seconds and geotags your pictures. " +
             "Needs location access.",
+        LineIcon.Kind.PIN,
     ) { on -> a.onLocationSyncToggled(on) }
     private val intervals = FujiGatt.LOCATION_SYNC_INTERVALS
     private val intervalChips = Kit.Chips(c, intervals.map { if (it < 60) "${it}s" else "${it / 60}m" }) { i ->
         a.session.setCameraLocationInterval(intervals[i])
     }
-    private val connectWhileOff = Kit.Toggle(c, "Connect while power off", "The camera keeps Bluetooth on in standby, so the app can reach it while it's off.") { on ->
+    private val connectWhileOff = Kit.Toggle(c, "Connect while power off", "The camera keeps Bluetooth on in standby, so the app can reach it while it's off.", LineIcon.Kind.POWER) { on ->
         a.session.setCameraConnectWhileOff(on)
     }
-    private val cameraPicture = Kit.PickerRow(c, "Camera picture") {
+    private val cameraPicture = Kit.PickerRow(c, "Camera picture", LineIcon.Kind.SHOTS) {
         a.choose("Camera picture", listOf("Choose a photo of your camera", "Use the app's drawing"), -1) { i ->
             if (i == 0) a.pickCameraPicture() else {
                 CameraPicture.clear(a)
@@ -42,8 +44,8 @@ class SettingsScreen(private val a: MainActivity) {
     private val cameraPanel = Kit.panel(c)
 
     val view: View = Kit.page(c, Kit.column(c).apply {
-        addView(Kit.label(c, "Preferences", Deco.DIM), Kit.lp(top = Deco.dpi(c, 12)))
-        addView(Kit.text(c, "Settings", 30f), Kit.lp(top = Deco.dpi(c, 12)))
+        addView(Kit.label(c, "Preferences", Deco.AMBER_LIGHT, 10f), Kit.lp(top = Deco.dpi(c, 12)))
+        addView(Kit.text(c, "Settings", 28f, Deco.TEXT, bold = true), Kit.lp(top = Deco.dpi(c, 8)))
 
         addView(Kit.sectionTitle(c, "In this app"))
         addView(Kit.panel(c).apply {
@@ -58,8 +60,13 @@ class SettingsScreen(private val a: MainActivity) {
             addView(Kit.hairline(c))
             addView(Kit.column(c).apply {
                 setPadding(0, Deco.dpi(c, 14), 0, Deco.dpi(c, 14))
-                addView(Kit.text(c, "Location interval", 15f))
-                addView(Kit.text(c, "How often the camera asks for the location.", 13f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 5)))
+                addView(Kit.row(c).apply {
+                    addView(Kit.iconSquare(c, LineIcon.Kind.REFRESH))
+                    addView(Kit.column(c).apply {
+                        addView(Kit.text(c, "Location interval", 15f))
+                        addView(Kit.text(c, "How often the camera asks for the location.", 12f, Deco.MUTED), Kit.lp(top = Deco.dpi(c, 5)))
+                    }, Kit.lp(0, weight = 1f))
+                })
                 addView(intervalChips.view, Kit.lp(top = Deco.dpi(c, 12)))
             })
             addView(Kit.hairline(c))
@@ -73,14 +80,14 @@ class SettingsScreen(private val a: MainActivity) {
                 c,
                 "The app records what it does with the camera, including every Bluetooth exchange and error. " +
                     "If something looks off, save the log and send it. It holds no locations or passwords.",
-                14f, Deco.MUTED,
+                13f, Deco.MUTED,
             )
         )
-        addView(Kit.button(c, "Save log to Downloads", icon = LineIcon.Kind.DOWNLOAD) { a.saveLog() }, Kit.lp(top = Deco.dpi(c, 16)))
         addView(Kit.row(c).apply {
-            addView(Kit.button(c, "Share log", Kit.Style.SECONDARY, LineIcon.Kind.SHARE) { a.shareLog() }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
-            addView(Kit.button(c, "Clear log", Kit.Style.QUIET, LineIcon.Kind.TRASH) { a.confirmClearLog() }, Kit.lp(0, weight = 1f))
-        }, Kit.lp(top = Deco.dpi(c, 10)))
+            addView(Kit.button(c, "Save", Kit.Style.SECONDARY, LineIcon.Kind.DOWNLOAD) { a.saveLog() }.apply { contentDescription = "Save the log to Downloads" }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
+            addView(Kit.button(c, "Share", Kit.Style.SECONDARY, LineIcon.Kind.SHARE) { a.shareLog() }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 10) })
+            addView(Kit.iconButton(c, LineIcon.Kind.TRASH, "Clear the log", 52) { a.confirmClearLog() })
+        }, Kit.lp(top = Deco.dpi(c, 16)))
 
         addView(Kit.sectionTitle(c, "About"))
         addView(Kit.panel(c).apply {

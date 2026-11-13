@@ -18,7 +18,8 @@ class BackupsScreen(private val a: MainActivity) {
     }
 
     private val c = a
-    private val backupButton = Kit.button(c, "Back up camera settings", icon = LineIcon.Kind.ARCHIVE) { a.askBackupName() }
+    private val backupButton = Kit.button(c, "Back up now", icon = LineIcon.Kind.ARCHIVE) { a.askBackupName() }
+    private val count = Kit.text(c, "Backups", 28f, Deco.TEXT, bold = true)
     private val progress = Kit.progress(c)
     private val status = Kit.text(c, null, 14f, Deco.MUTED)
     private val list = Kit.column(c)
@@ -28,27 +29,37 @@ class BackupsScreen(private val a: MainActivity) {
     private var items: List<BackupMeta> = emptyList()
 
     val view: View = Kit.page(c, Kit.column(c).apply {
-        addView(Kit.label(c, "Recipes", Deco.DIM), Kit.lp(top = Deco.dpi(c, 12)))
-        addView(Kit.text(c, "Backups", 30f), Kit.lp(top = Deco.dpi(c, 12)))
+        addView(Kit.row(c).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(Kit.column(c).apply {
+                addView(Kit.label(c, "Backups", Deco.AMBER_LIGHT, 10f))
+                addView(count, Kit.lp(top = Deco.dpi(c, 8)))
+            }, Kit.lp(0, weight = 1f))
+            addView(Kit.button(c, "Import", Kit.Style.SECONDARY, LineIcon.Kind.DOWNLOAD) { a.pickBackupToImport() }.apply {
+                minHeight = Deco.dpi(c, 42)
+                setPadding(Deco.dpi(c, 16), 0, Deco.dpi(c, 18), 0)
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 10f)
+            }, Kit.lp(Kit.WRAP))
+        }, Kit.lp(top = Deco.dpi(c, 12)))
         addView(
             Kit.text(
                 c,
                 "A backup is the camera's own settings file: every setting, including your C1–C7 custom " +
                     "settings with your film-simulation recipes. Restoring puts all of them back, onto the same model.",
-                14f, Deco.MUTED,
+                13f, Deco.MUTED,
             ),
-            Kit.lp(top = Deco.dpi(c, 14)),
+            Kit.lp(top = Deco.dpi(c, 12)),
         )
-        addView(backupButton, Kit.lp(top = Deco.dpi(c, 24)))
+        addView(backupButton, Kit.lp(top = Deco.dpi(c, 18)))
         addView(progress, Kit.lp(top = Deco.dpi(c, 12)))
         addView(status, Kit.lp(top = Deco.dpi(c, 10)))
-        addView(Layouts.header(c, "Saved on this phone", "IMPORT A FILE") { a.pickBackupToImport() })
-        addView(empty)
-        addView(list)
+        addView(empty, Kit.lp(top = Deco.dpi(c, 16)))
+        addView(list, Kit.lp(top = Deco.dpi(c, 14)))
     })
 
     fun refreshList() {
         items = a.session.store.list()
+        count.text = if (items.isEmpty()) "None saved" else "${items.size} saved"
         empty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
         drawList()
     }
@@ -95,39 +106,52 @@ class BackupsScreen(private val a: MainActivity) {
 
     private fun drawList() {
         list.removeAllViews()
-        val days = DateFormat.getDateInstance(DateFormat.MEDIUM)
         val times = DateFormat.getTimeInstance(DateFormat.SHORT)
-        // Each backup as a ticket, like the references' boarding passes: what and when on top,
-        // the details as labelled fields, a tear line, the recipes inside, then what to do with it.
-        for (meta in items) {
-            list.addView(Kit.panel(c, padH = CARD_PAD, padV = 18).apply {
+        val months = java.text.SimpleDateFormat("MMM", java.util.Locale.getDefault())
+        val dayOfMonth = java.text.SimpleDateFormat("dd", java.util.Locale.getDefault())
+        // Each backup as a ticket: the date set large on the left, what and when beside it, a
+        // tear line, the recipes inside as chips, then restoring it.
+        for ((n, meta) in items.withIndex()) {
+            val saved = Date(meta.savedAt)
+            list.addView(Kit.column(c).apply {
+                contentDescription = DateFormat.getDateInstance(DateFormat.MEDIUM).format(saved)
+                background = Deco.glass(c, 16f, if (n == 0) GlassDrawable.Tone.WARM else GlassDrawable.Tone.PANE)
+                setPadding(Deco.dpi(c, CARD_PAD), Deco.dpi(c, 16), Deco.dpi(c, CARD_PAD), Deco.dpi(c, 16))
                 addView(Kit.row(c).apply {
                     gravity = Gravity.CENTER_VERTICAL
-                    addView(Kit.text(c, meta.name, 17f, Deco.TEXT, bold = true), Kit.lp(0, weight = 1f))
-                    addView(Kit.label(c, times.format(Date(meta.savedAt)), Deco.AMBER_LIGHT, 10f), Kit.lp(Kit.WRAP).apply { marginStart = Deco.dpi(c, 8) })
+                    addView(Kit.column(c).apply {
+                        gravity = Gravity.CENTER_HORIZONTAL
+                        addView(Kit.text(c, dayOfMonth.format(saved), 26f, Deco.TEXT, bold = true))
+                        addView(Kit.label(c, months.format(saved), Deco.DIM, 8f), Kit.lp(Kit.WRAP, top = Deco.dpi(c, 4)))
+                    }, LinearLayout.LayoutParams(Deco.dpi(c, 50), Kit.WRAP).apply { marginEnd = Deco.dpi(c, 12) })
+                    addView(Kit.column(c).apply {
+                        addView(Kit.text(c, meta.name, 15f, Deco.TEXT).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+                        addView(Kit.label(c, listOf(times.format(saved), Formatter.formatShortFileSize(c, meta.size.toLong()), meta.cameraModel.ifBlank { null }, meta.firmware.ifBlank { null }?.let { "fw $it" })
+                            .filterNotNull().joinToString(" · "), Deco.DIM, 8f).apply { maxLines = 1 }, Kit.lp(top = Deco.dpi(c, 6)))
+                    }, Kit.lp(0, weight = 1f))
+                    addView(Kit.iconButton(c, LineIcon.Kind.SHARE, "Share", 40) { a.shareBackup(meta) }, LinearLayout.LayoutParams(Deco.dpi(c, 40), Deco.dpi(c, 40)).apply { marginStart = Deco.dpi(c, 8) })
+                    addView(Kit.iconButton(c, LineIcon.Kind.TRASH, "Delete", 40) { a.confirmDelete(meta) }, LinearLayout.LayoutParams(Deco.dpi(c, 40), Deco.dpi(c, 40)).apply { marginStart = Deco.dpi(c, 8) })
                 })
-                addView(Kit.row(c).apply {
-                    addView(Layouts.field(c, "CAMERA", meta.cameraModel.ifBlank { "—" }), Kit.lp(0, weight = 1f))
-                    addView(Layouts.field(c, "FIRMWARE", meta.firmware.ifBlank { "—" }), Kit.lp(0, weight = 1f))
-                    addView(Layouts.field(c, "DATE", days.format(Date(meta.savedAt)), end = true), Kit.lp(0, weight = 1.3f))
-                }, Kit.lp(top = Deco.dpi(c, 16)))
                 addView(TicketDivider(c), LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 18)).apply {
-                    topMargin = Deco.dpi(c, 16)
+                    topMargin = Deco.dpi(c, 14)
                     marginStart = -Deco.dpi(c, CARD_PAD)
                     marginEnd = -Deco.dpi(c, CARD_PAD)
                 })
                 val recipes = a.session.store.settings(meta)?.customSlots.orEmpty().filter { it.name.isNotBlank() }
-                addView(Kit.row(c).apply {
-                    addView(Layouts.field(c, "RECIPES", recipes.joinToString("  ·  ") { "${it.label} ${it.name}" }.ifBlank { "—" }), Kit.lp(0, weight = 1f))
-                    addView(Layouts.field(c, "SIZE", Formatter.formatShortFileSize(c, meta.size.toLong()), end = true), Kit.lp(Kit.WRAP).apply { marginStart = Deco.dpi(c, 12) })
-                }, Kit.lp(top = Deco.dpi(c, 14)))
-                addView(Kit.row(c).apply {
-                    val restore = Kit.button(c, "Restore", Kit.Style.SECONDARY, LineIcon.Kind.UPLOAD) { a.confirmRestore(meta) }
-                    Kit.setEnabled(restore, restoreAllowed)
-                    addView(restore, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 8) })
-                    addView(Kit.iconButton(c, LineIcon.Kind.SHARE, "Share") { a.shareBackup(meta) }, LinearLayout.LayoutParams(Deco.dpi(c, 44), Deco.dpi(c, 44)).apply { marginEnd = Deco.dpi(c, 8) })
-                    addView(Kit.iconButton(c, LineIcon.Kind.TRASH, "Delete") { a.confirmDelete(meta) })
-                }, Kit.lp(top = Deco.dpi(c, 14)))
+                addView(FlowLayout(c, Deco.dpi(c, 6), Deco.dpi(c, 6)).apply {
+                    if (recipes.isEmpty()) addView(Kit.label(c, "No custom recipes", Deco.DIM, 8f))
+                    recipes.forEach { r ->
+                        addView(Kit.label(c, "${r.label} ${r.name}", Deco.TEXT_SOFT, 8f).apply {
+                            gravity = Gravity.CENTER
+                            minHeight = Deco.dpi(c, 26)
+                            setPadding(Deco.dpi(c, 10), 0, Deco.dpi(c, 10), 0)
+                            background = Deco.glass(c, -1f, GlassDrawable.Tone.WELL)
+                        })
+                    }
+                }, Kit.lp(top = Deco.dpi(c, 12)))
+                val restore = Kit.button(c, "Restore to the camera", Kit.Style.SECONDARY, LineIcon.Kind.UPLOAD) { a.confirmRestore(meta) }
+                Kit.setEnabled(restore, restoreAllowed)
+                addView(restore, Kit.lp(top = Deco.dpi(c, 14)))
             }, Kit.lp(bottom = Deco.dpi(c, 12)))
         }
     }

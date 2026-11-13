@@ -36,7 +36,7 @@ class StageView(context: Context) : View(context) {
     private val softPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
     private val glowPaint = Paint(Paint.DITHER_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD) } // light adds up
     private val corePaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val grainPaint = Paint().apply { shader = BitmapShader(grain(), Shader.TileMode.REPEAT, Shader.TileMode.REPEAT) }
+    private val grainPaint = Paint().apply { shader = BitmapShader(grainTile(), Shader.TileMode.REPEAT, Shader.TileMode.REPEAT) }
     private val matrix = Matrix()
     private val screen = Rect()
     private val key = unit(Deco.AMBER)
@@ -44,6 +44,10 @@ class StageView(context: Context) : View(context) {
     private val fog = unit(FOG)
     private var soft: Bitmap? = null
     private var softCanvas: Canvas? = null
+    /** The light again at a quarter of [soft]'s size: what glass picks up (see [Stagelight]). */
+    private var tiny: Bitmap? = null
+    private var tinyCanvas: Canvas? = null
+    private val tinyRect = Rect()
     private var running = false
     private var lastFrame = 0L
     private var air = 0f
@@ -68,6 +72,15 @@ class StageView(context: Context) : View(context) {
         val bmp = createBitmap(max(1, w / SOFT), max(1, h / SOFT))
         soft = bmp
         softCanvas = Canvas(bmp).apply { scale(bmp.width / w.toFloat(), bmp.height / h.toFloat()) }
+        val small = createBitmap(max(1, bmp.width / 4), max(1, bmp.height / 4))
+        tiny = small
+        tinyCanvas = Canvas(small)
+        tinyRect.set(0, 0, small.width, small.height)
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        getLocationInWindow(Stagelight.origin)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -97,6 +110,12 @@ class StageView(context: Context) : View(context) {
 
         screen.set(0, 0, width, height)
         canvas.drawBitmap(soft, null, screen, softPaint)
+        val small = tiny
+        if (small != null) {
+            small.eraseColor(0)
+            tinyCanvas?.drawBitmap(soft, null, tinyRect, softPaint)
+            Stagelight.update(small, w / small.width, h / small.height)
+        }
         for (i in 0 until rig) {
             val tone = if (i % 2 == 1) LED else mix(Deco.AMBER, LED, 0.6f)
             corePaint.color = alpha(tone, min(1f, brightness(i, rig) + 0.2f))
@@ -125,27 +144,27 @@ class StageView(context: Context) : View(context) {
         softCanvas?.drawRect(x - rx, y - ry, x + rx, y + ry, glowPaint)
     }
 
-    private companion object {
-        const val SOFT = 8
-        const val FRAME_MS = 33L
-        const val FOG = 0xFFB4C8E1.toInt()
+    companion object {
+        private const val SOFT = 8
+        private const val FRAME_MS = 33L
+        private const val FOG = 0xFFC4C6CA.toInt()
         /** The rig's white lamps (Worldly's LED). */
-        const val LED = 0xFFFDF2E7.toInt()
+        private const val LED = 0xFFFDF2E7.toInt()
 
         /** A round glow of radius 1 around the origin, from the colour to nothing. */
-        fun unit(colour: Int): Shader =
+        private fun unit(colour: Int): Shader =
             RadialGradient(0f, 0f, 1f, colour or 0xFF000000.toInt(), colour and 0x00FFFFFF, Shader.TileMode.CLAMP)
 
-        fun alpha(colour: Int, a: Float): Int = ((a.coerceIn(0f, 1f) * 255).roundToInt() shl 24) or (colour and 0x00FFFFFF)
+        private fun alpha(colour: Int, a: Float): Int = ((a.coerceIn(0f, 1f) * 255).roundToInt() shl 24) or (colour and 0x00FFFFFF)
 
-        fun mix(a: Int, b: Int, t: Float): Int {
+        private fun mix(a: Int, b: Int, t: Float): Int {
             fun ch(c: Int, s: Int) = (c shr s) and 0xFF
             fun lerp(s: Int) = (ch(a, s) + (ch(b, s) - ch(a, s)) * t).roundToInt()
             return (0xFF shl 24) or (lerp(16) shl 16) or (lerp(8) shl 8) or lerp(0)
         }
 
-        /** A tile of faint white specks, like film grain. */
-        fun grain(): Bitmap {
+        /** A tile of faint white specks, like film grain (glass uses it too). */
+        fun grainTile(): Bitmap {
             val size = 128
             val random = Random(7)
             val pixels = IntArray(size * size) {

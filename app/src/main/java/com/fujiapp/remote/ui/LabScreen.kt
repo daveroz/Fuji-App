@@ -156,12 +156,12 @@ class LabScreen(private val a: MainActivity) {
         group(sharpness.view, clarity.view, noise.view),
     )
     private val controls = FrameLayout(c)
-    private val tabs = Kit.Chips(c, listOf("Film", "Color", "Light", "Tone", "Detail")) { showGroup(it) }
+    private val tabs = Kit.Segmented(c, listOf("Film", "Color", "Light", "Tone", "Detail")) { showGroup(it) }
     private val scopeToggle = Kit.Chips(c, listOf("Scope")) { toggleScope() }
 
     /** The preview's box: the picture sits inside it with an even margin and matching corners. */
     private val frame = FrameLayout(c).apply {
-        background = Deco.glass(c, 16f)
+        background = Deco.glass(c, Layouts.CARD_RADIUS)
         val pad = Deco.dpi(c, FRAME_PAD_DP)
         setPadding(pad, pad, pad, pad)
         addView(image, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
@@ -175,7 +175,8 @@ class LabScreen(private val a: MainActivity) {
 
     val view: View = Kit.column(c).apply {
         val m = Deco.dpi(c, Kit.PAGE_MARGIN)
-        setPadding(m, Deco.dpi(c, 10), m, Deco.dpi(c, 10))
+        // Its foot clears the floating tab bar.
+        setPadding(m, Deco.dpi(c, 10), m, Deco.dpi(c, Kit.TAB_SPACE))
         addView(Kit.row(c).apply {
             addView(name, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 8) })
             addView(small("Picture") {
@@ -628,7 +629,7 @@ private class FilmStrip(c: android.content.Context, names: List<String>, private
         selected = index
         cells.forEachIndexed { i, cell ->
             val on = i == index
-            cell.background = if (on) Deco.box(context, Deco.KEY_GLASS, Deco.AMBER, 9f) else null
+            cell.background = if (on) Deco.lit(context, 10f) else null
             labels[i].setTextColor(if (on) Deco.AMBER_LIGHT else Deco.DIM)
         }
     }

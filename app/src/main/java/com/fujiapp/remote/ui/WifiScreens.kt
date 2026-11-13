@@ -8,6 +8,7 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import androidx.core.view.isGone
 import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
@@ -99,7 +100,7 @@ class PhotosScreen(private val a: MainActivity) {
 
     private fun tile(cp: CardPhoto): View = Kit.column(c).apply {
         val on = cp.photo.handle in selected
-        background = if (on) Deco.lit(c, 10f) else Deco.box(c, Deco.WELL, Deco.BORDER, 10f)
+        background = if (on) Deco.lit(c, 12f) else Deco.glass(c, 12f)
         val inset = Deco.dpi(c, Deco.Lit.INSET_DP.toInt()) + Deco.dpi(c, 3)
         setPadding(inset, inset, inset, inset)
         addView(ImageView(c).apply {
@@ -134,9 +135,9 @@ class RemoteScreen(private val a: MainActivity) {
     }
     private val marker = View(c).apply {
         background = GradientDrawable().apply {
-            setColor(0)
+            setColor(0x1FEB9438)
             setStroke(Deco.dpi(c, 2), Deco.AMBER_LIGHT)
-            cornerRadius = Deco.dp(c, 3f)
+            cornerRadius = Deco.dp(c, 8f)
         }
         visibility = View.GONE
     }
@@ -148,19 +149,19 @@ class RemoteScreen(private val a: MainActivity) {
         contentDescription = "The picture just taken"
     }
     /** "Saving", over the live view while the camera finishes a shot. */
-    private val saving = Kit.label(c, "Saving…", Deco.AMBER_LIGHT, 11f).apply {
+    private val saving = Kit.label(c, "Saving…", Deco.AMBER_LIGHT, 10f).apply {
         gravity = Gravity.CENTER
-        background = Deco.box(c, 0x99000000.toInt(), Deco.AMBER, 16f)
-        setPadding(Deco.dpi(c, 16), Deco.dpi(c, 8), Deco.dpi(c, 16), Deco.dpi(c, 8))
+        background = Deco.glass(c, -1f, GlassDrawable.Tone.BAR)
+        setPadding(Deco.dpi(c, 18), Deco.dpi(c, 10), Deco.dpi(c, 18), Deco.dpi(c, 10))
         visibility = View.GONE
     }
     /** The live view set into its glass card: an even glass margin, rounded to match. */
     private val frame = FrameLayout(c).apply {
         background = Deco.glass(c, Layouts.CARD_RADIUS)
-        val pad = Deco.dpi(c, 6)
+        val pad = Deco.dpi(c, FRAME_PAD_DP)
         setPadding(pad, pad, pad, pad)
         addView(FrameLayout(c).apply {
-            background = Deco.box(c, 0xFF000000.toInt(), 0, Layouts.CARD_RADIUS - 6f)
+            background = Deco.box(c, 0xFF000000.toInt(), 0, Layouts.CARD_RADIUS - FRAME_PAD_DP)
             outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
             clipToOutline = true
             addView(live, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
@@ -171,24 +172,29 @@ class RemoteScreen(private val a: MainActivity) {
     }
 
     // The readout (Hasselblad rear screen).
-    private val topLine = Kit.label(c, "", Deco.MUTED, 9f)
+    private val topLine = Kit.label(c, "", Deco.MUTED, 9f).apply { maxLines = 1 }
     private val battery = Kit.label(c, "", Deco.MUTED, 9f).apply { gravity = Gravity.END }
+    private val batteryLed = Kit.led(c, Deco.AMBER, 15)
     private val apertureValue = big().apply { gravity = Gravity.CENTER }
     private val shutterValue = big().apply { gravity = Gravity.CENTER }
-    private val isoValue = Kit.label(c, "", Deco.TEXT_SOFT, 11f).apply { gravity = Gravity.END }
+    private val isoValue = Kit.label(c, "", Deco.TEXT, 12f).apply {
+        gravity = Gravity.END
+        maxLines = 1
+        letterSpacing = 0.12f
+    }
     private val evScale = EvScale(c)
-    private val evValue = Kit.label(c, "EV 0", Deco.TEXT_SOFT, 9f)
-    private val modeValue = Kit.text(c, "—", 22f, Deco.TEXT, bold = true)
+    private val evValue = Kit.label(c, "EV 0", Deco.TEXT_SOFT, 8f).apply { gravity = Gravity.CENTER }
+    private val modeValue = Kit.text(c, "—", 20f, Deco.TEXT, bold = true).apply { letterSpacing = 0.2f }
     private val shotsValue = Kit.text(c, "", 15f, Deco.TEXT_SOFT, bold = true).apply {
         gravity = Gravity.END or Gravity.CENTER_VERTICAL
         val size = Deco.dpi(c, 16)
         setCompoundDrawablesRelative(IconDrawable(LineIcon.Kind.SHOTS, Deco.MUTED, c).apply { setBounds(0, 0, size, size) }, null, null, null)
         compoundDrawablePadding = Deco.dpi(c, 8)
     }
-    private val apertureDown = Kit.iconButton(c, LineIcon.Kind.CHEVRON_LEFT, "Smaller aperture number") { a.wifi.stepAperture(false) }
-    private val apertureUp = Kit.iconButton(c, LineIcon.Kind.CHEVRON_RIGHT, "Larger aperture number") { a.wifi.stepAperture(true) }
-    private val shutterDown = Kit.iconButton(c, LineIcon.Kind.CHEVRON_LEFT, "Slower shutter speed") { a.wifi.stepShutter(false) }
-    private val shutterUp = Kit.iconButton(c, LineIcon.Kind.CHEVRON_RIGHT, "Faster shutter speed") { a.wifi.stepShutter(true) }
+    private val apertureDown = Kit.iconButton(c, LineIcon.Kind.CHEVRON_LEFT, "Smaller aperture number", STEP_DP) { a.wifi.stepAperture(false) }
+    private val apertureUp = Kit.iconButton(c, LineIcon.Kind.CHEVRON_RIGHT, "Larger aperture number", STEP_DP) { a.wifi.stepAperture(true) }
+    private val shutterDown = Kit.iconButton(c, LineIcon.Kind.CHEVRON_LEFT, "Slower shutter speed", STEP_DP) { a.wifi.stepShutter(false) }
+    private val shutterUp = Kit.iconButton(c, LineIcon.Kind.CHEVRON_RIGHT, "Faster shutter speed", STEP_DP) { a.wifi.stepShutter(true) }
     /** In place of the steps when the camera picks the value (its mode, or a dial on A). */
     private val apertureAuto = autoBadge()
     private val shutterAuto = autoBadge()
@@ -211,55 +217,60 @@ class RemoteScreen(private val a: MainActivity) {
     private val shutterButton by lazy { shutter() }
 
     val view: View = Kit.page(c, Kit.column(c).apply {
+        // What's happening, and the way out; the header above names the camera and the link.
         addView(Kit.row(c).apply {
             gravity = Gravity.CENTER_VERTICAL
-            addView(Kit.column(c).apply {
-                addView(Kit.label(c, "Over Wi-Fi", Deco.DIM))
-                addView(Layouts.wideTitle(c, "Remote", 20f), Kit.lp(top = Deco.dpi(c, 6)))
-            }, Kit.lp(0, weight = 1f))
-            addView(Kit.iconButton(c, LineIcon.Kind.CLOSE, "Close") { a.closeCameraPage() })
+            addView(status, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 12) })
+            addView(Kit.iconButton(c, LineIcon.Kind.CLOSE, "Close the remote", 40) { a.closeCameraPage() })
         })
-        addView(status, Kit.lp(top = Deco.dpi(c, 4)))
         addView(progress, Kit.lp(top = Deco.dpi(c, 4)))
-        addView(frame, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 206)).apply { topMargin = Deco.dpi(c, 8) })
+        addView(frame, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, LIVE_DP)).apply { topMargin = Deco.dpi(c, 8) })
+        // The readout, as a camera's rear screen.
         addView(Layouts.hero(c).apply {
-            setPadding(Deco.dpi(c, 16), Deco.dpi(c, 12), Deco.dpi(c, 16), Deco.dpi(c, 12))
-            addView(Kit.row(c).apply {
-                addView(topLine, Kit.lp(0, weight = 1f))
-                addView(battery, Kit.lp(Kit.WRAP))
-            })
-            // Aperture and shutter speed side by side, each with its steps beside it (or AUTO under it).
+            setPadding(Deco.dpi(c, 16), Deco.dpi(c, 14), Deco.dpi(c, 16), Deco.dpi(c, 12))
             addView(Kit.row(c).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                addView(valueGroup(apertureValue, apertureDown, apertureUp, apertureAuto), Kit.lp(0, weight = 1f))
-                addView(View(c).apply { setBackgroundColor(Deco.BORDER_SOFT) }, LinearLayout.LayoutParams(maxOf(1, Deco.dpi(c, 1)), Deco.dpi(c, 56)).apply {
+                addView(topLine, Kit.lp(0, weight = 1f))
+                addView(batteryLed)
+                addView(battery, Kit.lp(Kit.WRAP))
+            })
+            // Aperture on the left, shutter speed on the right, each with its steps on its sides
+            // (‹ f/2.2 ›); when the camera picks one, its steps give way to AUTO under it.
+            addView(Kit.row(c).apply {
+                gravity = Gravity.TOP
+                addView(valueGroup(apertureValue, apertureDown, apertureUp, apertureAuto, Gravity.START), Kit.lp(Kit.WRAP))
+                addView(View(c), Kit.lp(0, weight = 1f))
+                addView(valueGroup(shutterValue, shutterDown, shutterUp, shutterAuto, Gravity.END), Kit.lp(Kit.WRAP))
+            }, Kit.lp(top = Deco.dpi(c, 12)))
+            addView(Kit.row(c).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                addView(Kit.iconButton(c, LineIcon.Kind.CHEVRON_LEFT, "Less exposure", STEP_DP) { a.wifi.stepExposure(false) })
+                addView(Kit.column(c).apply {
+                    addView(evScale, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 28)))
+                    addView(evValue, Kit.lp(top = Deco.dpi(c, 3)))
+                }, Kit.lp(0, weight = 1f).apply {
                     marginStart = Deco.dpi(c, 6)
                     marginEnd = Deco.dpi(c, 6)
                 })
-                addView(valueGroup(shutterValue, shutterDown, shutterUp, shutterAuto), Kit.lp(0, weight = 1f))
-            }, Kit.lp(top = Deco.dpi(c, 8)))
-            addView(Kit.row(c).apply {
-                gravity = Gravity.CENTER_VERTICAL
-                addView(Kit.iconButton(c, LineIcon.Kind.CHEVRON_LEFT, "Less exposure") { a.wifi.stepExposure(false) })
+                addView(Kit.iconButton(c, LineIcon.Kind.CHEVRON_RIGHT, "More exposure", STEP_DP) { a.wifi.stepExposure(true) })
                 addView(Kit.column(c).apply {
-                    addView(evScale, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 18)))
-                    addView(evValue, Kit.lp(top = Deco.dpi(c, 2)))
-                }, Kit.lp(0, weight = 1f))
-                addView(Kit.iconButton(c, LineIcon.Kind.CHEVRON_RIGHT, "More exposure") { a.wifi.stepExposure(true) })
-                addView(isoValue, Kit.lp(Kit.WRAP).apply { marginStart = Deco.dpi(c, 10) })
-            }, Kit.lp(top = Deco.dpi(c, 4)))
-            addView(Kit.hairline(c), Kit.lp(top = Deco.dpi(c, 6)))
+                    gravity = Gravity.END
+                    addView(Kit.label(c, "ISO", Deco.DIM, 8f))
+                    addView(isoValue, Kit.lp(Kit.WRAP, top = Deco.dpi(c, 5)))
+                }, Kit.lp(Kit.WRAP).apply { marginStart = Deco.dpi(c, 12) })
+            }, Kit.lp(top = Deco.dpi(c, 12)))
+            addView(Kit.hairline(c), Kit.lp(top = Deco.dpi(c, 12)))
             addView(Kit.row(c).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 addView(modeValue, Kit.lp(0, weight = 1f))
                 addView(shotsValue, Kit.lp(Kit.WRAP))
-            }, Kit.lp(top = Deco.dpi(c, 4)))
-        }, Kit.lp(top = Deco.dpi(c, 8)))
-        addView(Layouts.tileRow(c, listOf(filmTile, wbTile, flashTile, timerTile, isoTile)), Kit.lp(top = Deco.dpi(c, 10)))
+            }, Kit.lp(top = Deco.dpi(c, 10)))
+        }, Kit.lp(top = Deco.dpi(c, 10)))
+        addView(Layouts.tileRow(c, listOf(filmTile, wbTile, flashTile, timerTile, isoTile)), Kit.lp(top = Deco.dpi(c, 12)))
         addView(Kit.row(c).apply {
             gravity = Gravity.CENTER_VERTICAL
-            addView(focusButton, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 16) })
-            addView(shutterButton, LinearLayout.LayoutParams(Deco.dpi(c, 72), Deco.dpi(c, 72)))
+            addView(focusButton, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 14) })
+            addView(shutterButton, LinearLayout.LayoutParams(Deco.dpi(c, SHUTTER_DP), Deco.dpi(c, SHUTTER_DP)))
         }, Kit.lp(top = Deco.dpi(c, 10)))
     })
 
@@ -272,32 +283,37 @@ class RemoteScreen(private val a: MainActivity) {
         }
     }
 
-    private fun big() = Kit.text(c, "—", 28f, Deco.TEXT, bold = true).apply {
+    private fun big() = Kit.text(c, "—", 32f, Deco.TEXT, bold = true).apply {
         maxLines = 1
+        gravity = Gravity.CENTER
         // Between its two steps the value shrinks rather than wraps (1/4000 is long).
-        setAutoSizeTextTypeUniformWithConfiguration(16, 28, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+        setAutoSizeTextTypeUniformWithConfiguration(16, 32, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
     }
 
     /**
-     * A value with its steps beside it: ‹ f/2.2 ›. When the camera picks the value, the steps give
-     * way to an AUTO badge under it.
+     * A value with its steps on its sides: ‹ f/2.2 ›. When the camera picks the value, the steps
+     * give way to an AUTO badge under it, and the value moves to the group's outer edge.
      */
-    private fun valueGroup(value: android.widget.TextView, down: View, up: View, auto: View): View = Kit.column(c).apply {
-        gravity = Gravity.CENTER_HORIZONTAL
+    private fun valueGroup(value: android.widget.TextView, down: View, up: View, auto: View, side: Int): View = Kit.column(c).apply {
+        gravity = side
         addView(Kit.row(c).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(down)
-            addView(value, Kit.lp(0, weight = 1f))
+            addView(value, LinearLayout.LayoutParams(Deco.dpi(c, VALUE_DP), Deco.dpi(c, 44)).apply {
+                marginStart = Deco.dpi(c, 2)
+                marginEnd = Deco.dpi(c, 2)
+            })
             addView(up)
-        }, Kit.lp())
-        addView(auto, Kit.lp(Kit.WRAP).apply { topMargin = Deco.dpi(c, 4) })
+        }, Kit.lp(Kit.WRAP))
+        addView(auto, Kit.lp(Kit.WRAP).apply { topMargin = Deco.dpi(c, 6) })
     }
 
     /** "AUTO", lit: the camera picks this value. */
-    private fun autoBadge(): View = Kit.label(c, "AUTO", Deco.AMBER_LIGHT, 10f).apply {
+    private fun autoBadge(): View = Kit.label(c, "Auto", Deco.AMBER_LIGHT, 10f).apply {
         gravity = Gravity.CENTER
-        background = Deco.box(c, Deco.KEY_GLASS, Deco.AMBER, 14f)
-        setPadding(Deco.dpi(c, 14), Deco.dpi(c, 8), Deco.dpi(c, 14), Deco.dpi(c, 8))
+        background = Deco.lit(c, 17f)
+        val inset = Deco.dpi(c, Deco.Lit.INSET_DP.toInt())
+        setPadding(Deco.dpi(c, 18) + inset, Deco.dpi(c, 7) + inset, Deco.dpi(c, 18) + inset, Deco.dpi(c, 7) + inset)
         visibility = View.GONE
         contentDescription = "Set by the camera"
     }
@@ -325,11 +341,7 @@ class RemoteScreen(private val a: MainActivity) {
     }
 
     private fun shutter(): View = View(c).apply {
-        background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(Deco.KEY_GLASS)
-            setStroke(Deco.dpi(c, 3), Deco.AMBER)
-        }
+        background = Deco.pressable(ShutterDrawable(c), ShutterDrawable(c, pressed = true))
         contentDescription = "Take a picture"
         isClickable = true
         setOnClickListener {
@@ -408,12 +420,14 @@ class RemoteScreen(private val a: MainActivity) {
         val exposureMode = w.currentValue(FujiWifi.SHOOTING_MODE)
         val shutterIsAuto = exposureMode == 2L || exposureMode == 3L
         val apertureIsAuto = exposureMode == 2L || exposureMode == 4L
-        shutterDown.isInvisible = shutterIsAuto
-        shutterUp.isInvisible = shutterIsAuto
+        shutterDown.isGone = shutterIsAuto
+        shutterUp.isGone = shutterIsAuto
         shutterAuto.isVisible = shutterIsAuto
-        apertureDown.isInvisible = apertureIsAuto
-        apertureUp.isInvisible = apertureIsAuto
+        apertureDown.isGone = apertureIsAuto
+        apertureUp.isGone = apertureIsAuto
         apertureAuto.isVisible = apertureIsAuto
+        shutterValue.gravity = if (shutterIsAuto) Gravity.END or Gravity.CENTER_VERTICAL else Gravity.CENTER
+        apertureValue.gravity = if (apertureIsAuto) Gravity.START or Gravity.CENTER_VERTICAL else Gravity.CENTER
         // While a shot saves the camera is left alone (as XApp does): say so on the picture.
         val capturing = w.capturing.value
         saving.isVisible = capturing
@@ -426,8 +440,7 @@ class RemoteScreen(private val a: MainActivity) {
             shownReadings = r
             apertureValue.text = r["Aperture"] ?: "f/—"
             shutterValue.text = r["Shutter"] ?: "—"
-            val isoText = "ISO ${r["ISO"]?.uppercase() ?: "—"}"
-            isoValue.text = isoText
+            isoValue.text = r["ISO"]?.uppercase() ?: "—"
             val ev = w.currentValue(FujiWifi.EXPOSURE_BIAS)?.let { it.toInt().toShort() / 1000.0 } ?: 0.0
             evScale.set(ev)
             val evText = "EV ${r["Exposure"] ?: "0"}"
@@ -435,6 +448,7 @@ class RemoteScreen(private val a: MainActivity) {
             modeValue.text = r["Mode"] ?: "—"
             shotsValue.text = r["Shots"] ?: ""
             battery.text = r["Battery"]?.let { "BATTERY $it" } ?: ""
+            batteryLed.isVisible = r["Battery"] != null
             topLine.text = listOfNotNull(
                 w.currentValue(FujiWifi.WHITE_BALANCE)?.let { "WB " + shortLabel(FujiWifi.WHITE_BALANCE, it) },
                 w.currentValue(FujiWifi.FOCUS_MODE)?.let { shortLabel(FujiWifi.FOCUS_MODE, it) },
@@ -445,7 +459,12 @@ class RemoteScreen(private val a: MainActivity) {
 
     private companion object {
         const val MARKER_DP = 44
-        const val STEP_DP = 44
+        const val STEP_DP = 42
+        /** Each value's width between its steps: two groups fit side by side in M. */
+        const val VALUE_DP = 80
+        const val LIVE_DP = 214
+        const val FRAME_PAD_DP = 6
+        const val SHUTTER_DP = 78
     }
 }
 
@@ -465,19 +484,29 @@ private class EvScale(c: android.content.Context) : View(c) {
     override fun onDraw(canvas: android.graphics.Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-        val pad = h * 0.3f
+        val d = resources.displayMetrics.density
+        val pad = 4 * d
         val span = w - 2 * pad
-        p.strokeWidth = maxOf(1f, h * 0.06f)
-        for (k in -9..9) {
-            val x = pad + span * (k + 9) / 18f
-            val whole = k % 3 == 0
-            p.color = if (k == 0) Deco.TEXT_SOFT else Deco.DIM
-            canvas.drawLine(x, h * (if (whole) 0.25f else 0.45f), x, h * 0.75f, p)
+        val at = ((ev.coerceIn(-3.0, 3.0) + 3) / 6.0 * 18).toFloat() // in thirds from −3
+        p.strokeCap = android.graphics.Paint.Cap.ROUND
+        // A row of lamps: the third the exposure sits at lit and glowing, its neighbours warm.
+        for (k in 0..18) {
+            val x = pad + span * k / 18f
+            val whole = (k - 9) % 3 == 0
+            val near = kotlin.math.abs(k - at)
+            val top = h - (if (whole) 16 else 10) * d
+            p.strokeWidth = 2 * d
+            p.color = if (near < 1.5f) ((0x66 + (0x40 * (1 - near / 1.5f)).toInt()) shl 24) or (Deco.AMBER_LIGHT and 0xFFFFFF)
+            else if (whole) 0x73D2D4D8 else 0x47D2D4D8
+            canvas.drawLine(x, top, x, h - d, p)
         }
-        val x = pad + span * ((ev.coerceIn(-3.0, 3.0) + 3) / 6.0).toFloat()
-        p.color = Deco.AMBER
-        p.strokeWidth = maxOf(2f, h * 0.12f)
-        canvas.drawLine(x, 0f, x, h, p)
+        val x = pad + span * at / 18f
+        p.strokeWidth = 8 * d
+        p.color = 0x24EB9438
+        canvas.drawLine(x, d * 2, x, h - d, p)
+        p.strokeWidth = 3 * d
+        p.color = Deco.AMBER_LIGHT
+        canvas.drawLine(x, d * 2, x, h - d, p)
     }
 }
 

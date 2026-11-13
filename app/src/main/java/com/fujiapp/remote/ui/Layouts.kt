@@ -20,7 +20,7 @@ import com.fujiapp.remote.ui.LineIcon.Kind
  */
 object Layouts {
     /** Card corners, as in the references' rounded cards. */
-    const val CARD_RADIUS = 22f
+    const val CARD_RADIUS = 16f
 
     /** A glass card that frames a camera, a picture or a readout. */
     fun hero(c: Context): LinearLayout = Kit.column(c).apply {
@@ -71,7 +71,7 @@ object Layouts {
         }
         private val box = Kit.column(c).apply {
             gravity = Gravity.CENTER
-            background = Deco.pressable(Deco.glass(c, 18f), Deco.lit(c, 18f, pressed = true))
+            background = Deco.glassPressable(c, 14f)
             setPadding(Deco.dpi(c, 4), Deco.dpi(c, 8), Deco.dpi(c, 4), Deco.dpi(c, 6))
             addView(LineIcon(c, icon), LinearLayout.LayoutParams(Deco.dpi(c, 22), Deco.dpi(c, 22)))
             addView(valueText, Kit.lp(top = Deco.dpi(c, 4)))
@@ -82,7 +82,7 @@ object Layouts {
         }
         val view: View = Kit.column(c).apply {
             gravity = Gravity.CENTER_HORIZONTAL
-            addView(box, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 64)))
+            addView(box, LinearLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, 62)))
             addView(Kit.label(c, caption, Deco.DIM, 8f).apply { gravity = Gravity.CENTER; maxLines = 1 }, Kit.lp(top = Deco.dpi(c, 6)))
         }
 
@@ -195,7 +195,8 @@ class IconDrawable(private val kind: LineIcon.Kind, color: Int, private val cont
         val cy = b.top + h / 2
         p.color = lineColor
         p.alpha = alphaValue
-        p.strokeWidth = maxOf(1.5f, s * 0.07f)
+        // Chevrons on a bubble are the thumb's target: drawn a little bolder than the rest of the set.
+        p.strokeWidth = if (kind == Kind.CHEVRON_LEFT || kind == Kind.CHEVRON_RIGHT) maxOf(2f, s * 0.11f) else maxOf(1.5f, s * 0.07f)
         p.style = Paint.Style.STROKE
         when (kind) {
             Kind.SHOTS -> {
@@ -433,6 +434,24 @@ class IconDrawable(private val kind: LineIcon.Kind, color: Int, private val cont
                 }
                 canvas.drawLine(cx + s * 0.16f, cy - s * 0.34f, cx + s * 0.36f, cy + s * 0.34f, p)
             }
+            Kind.PHOTOS -> {
+                r.set(cx - s * 0.42f, cy - s * 0.32f, cx + s * 0.42f, cy + s * 0.32f)
+                canvas.drawRoundRect(r, s * 0.08f, s * 0.08f, p)
+                path.reset()
+                path.moveTo(cx - s * 0.42f, cy + s * 0.2f)
+                path.lineTo(cx - s * 0.16f, cy - s * 0.04f)
+                path.lineTo(cx + s * 0.04f, cy + s * 0.14f)
+                path.lineTo(cx + s * 0.18f, cy + s * 0.02f)
+                path.lineTo(cx + s * 0.42f, cy + s * 0.24f)
+                canvas.drawPath(path, p)
+                canvas.drawCircle(cx + s * 0.18f, cy - s * 0.14f, s * 0.06f, p)
+            }
+            Kind.REMOTE -> {
+                r.set(cx - s * 0.4f, cy - s * 0.2f, cx + s * 0.4f, cy + s * 0.34f)
+                canvas.drawRoundRect(r, s * 0.1f, s * 0.1f, p)
+                canvas.drawCircle(cx, cy + s * 0.07f, s * 0.13f, p)
+                canvas.drawLine(cx - s * 0.16f, cy - s * 0.38f, cx + s * 0.16f, cy - s * 0.38f, p)
+            }
             Kind.MACRO -> {
                 for (k in 0 until 5) {
                     val a = Math.toRadians(k * 72.0 - 90)
@@ -463,7 +482,7 @@ class LineIcon(c: Context, kind: Kind, color: Int = Deco.AMBER_LIGHT) : View(c) 
     enum class Kind {
         SHOTS, POWER, WIFI, CHIP, FILM, WB, FLASH, TIMER, FOCUS, ISO, BATTERY, MACRO, GAUGE, ARCHIVE, GEAR,
         CHEVRON_LEFT, CHEVRON_RIGHT, CLOSE, PLUS, MINUS, REFRESH, SHARE, TRASH, DOWNLOAD, UPLOAD, APERTURE,
-        BLUETOOTH, LOG, PIN, LAB, LIBRARY, CHECK,
+        BLUETOOTH, LOG, PIN, LAB, LIBRARY, CHECK, PHOTOS, REMOTE,
     }
 
     private val icon = IconDrawable(kind, color, c)

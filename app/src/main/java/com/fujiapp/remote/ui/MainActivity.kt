@@ -37,6 +37,7 @@ import com.fujiapp.remote.ble.FujiAdvert
 import com.fujiapp.remote.model.BackupMeta
 import com.fujiapp.remote.util.AppLog
 import com.fujiapp.remote.util.LogExporter
+import com.fujiapp.remote.wifi.WifiPhase
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
@@ -88,6 +89,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var notice: TextView
     private lateinit var stage: StageView
     private val tabViews = HashMap<Tab, Pair<View, TextView>>()
+    /** The last camera seen over Bluetooth, named in the header while it's on Wi-Fi. */
+    private var lastCamera: String? = null
     private var tab = Tab.CAMERA
     private var shown: View? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -243,67 +246,81 @@ class MainActivity : AppCompatActivity() {
                     title = Kit.text(c, "No camera", 26f, Deco.TEXT, bold = true).apply { maxLines = 1 }
                     addView(title, Kit.lp(top = Deco.dpi(c, 8)))
                 }, Kit.lp(0, weight = 1f))
-                addView(Kit.label(c, "Log", Deco.TEXT_SOFT, 11f).apply {
+                addView(Kit.label(c, "Log", Deco.TEXT_SOFT, 10f).apply {
                     gravity = Gravity.CENTER
                     minWidth = Deco.dpi(c, 64)
                     minHeight = Deco.dpi(c, 40)
-                    setPadding(Deco.dpi(c, 14), 0, Deco.dpi(c, 16), 0)
+                    setPadding(Deco.dpi(c, 16), 0, Deco.dpi(c, 18), 0)
                     val size = Deco.dpi(c, 16)
                     setCompoundDrawablesRelative(IconDrawable(LineIcon.Kind.LOG, Deco.AMBER_LIGHT, c).apply { setBounds(0, 0, size, size) }, null, null, null)
                     compoundDrawablePadding = Deco.dpi(c, 8)
-                    background = Deco.pressable(Deco.glass(c, 20f), Deco.lit(c, 20f, pressed = true))
+                    background = Deco.glassPressable(c, -1f)
                     isClickable = true
                     contentDescription = "Save the log to Downloads"
                     setOnClickListener { saveLog() }
                 })
             })
             addView(Kit.row(c).apply {
-                statusDot = View(c)
-                addView(statusDot, LinearLayout.LayoutParams(Deco.dpi(c, 7), Deco.dpi(c, 7)).apply { marginEnd = Deco.dpi(c, 10) })
-                statusText = Kit.label(c, "Offline", Deco.MUTED, 10f)
+                // A lamp with its glow: its core lines up with the title's left edge.
+                statusDot = Kit.led(c, Deco.DIM, 21).apply {
+                    (layoutParams as LinearLayout.LayoutParams).apply {
+                        marginStart = -Deco.dpi(c, 7)
+                        marginEnd = Deco.dpi(c, 4)
+                    }
+                }
+                addView(statusDot)
+                statusText = Kit.label(c, "Offline", Deco.TEXT_SOFT, 10f)
                 addView(statusText)
-            }, Kit.lp(top = Deco.dpi(c, 12)))
+            }, Kit.lp(top = Deco.dpi(c, 8)))
         }
 
         content = FrameLayout(c)
 
-        val tabRow = Kit.row(c)
+        // The tab bar floats over the page: a capsule of glass, the chosen tab a lighter lens in it.
+        val tabBar = Kit.row(c).apply {
+            background = Deco.glass(c, -1f, GlassDrawable.Tone.BAR)
+            val pad = Deco.dpi(c, 6)
+            setPadding(pad, pad, pad, pad)
+            elevation = Deco.dp(c, 12f)
+            outlineProvider = object : android.view.ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: android.graphics.Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height, view.height / 2f)
+                    outline.alpha = 0.5f
+                }
+            }
+        }
         for (t in Tab.entries) {
-            val indicator = View(c)
             val icon = LineIcon(c, t.icon, Deco.DIM)
             tabIcons[t] = icon
-            val label = Kit.label(c, t.title, Deco.DIM, 10f).apply {
+            val label = Kit.label(c, t.title, Deco.DIM, 8f).apply {
                 gravity = Gravity.CENTER
                 maxLines = 1
+                letterSpacing = 0.16f
                 // Five tabs on a narrow phone: let a long label shrink rather than wrap.
-                setAutoSizeTextTypeUniformWithConfiguration(7, 10, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+                setAutoSizeTextTypeUniformWithConfiguration(6, 8, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
             }
-            tabRow.addView(Kit.column(c).apply {
-                gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(0, 0, 0, Deco.dpi(c, 12))
-                addView(indicator, LinearLayout.LayoutParams(Deco.dpi(c, 24), Deco.dpi(c, 2)))
-                addView(icon, LinearLayout.LayoutParams(Deco.dpi(c, 22), Deco.dpi(c, 22)).apply { topMargin = Deco.dpi(c, 10) })
-                addView(label, Kit.lp(top = Deco.dpi(c, 6)))
+            val cell = Kit.column(c).apply {
+                gravity = Gravity.CENTER
+                setPadding(Deco.dpi(c, 2), 0, Deco.dpi(c, 2), 0)
+                addView(icon, LinearLayout.LayoutParams(Deco.dpi(c, 22), Deco.dpi(c, 22)))
+                addView(label, Kit.lp(top = Deco.dpi(c, 5)))
                 isClickable = true
+                contentDescription = t.title
                 setOnClickListener { select(t) }
-            }, Kit.lp(0, weight = 1f))
-            tabViews[t] = indicator to label
-        }
-        val tabBar = Kit.column(c).apply {
-            setBackgroundColor(TAB_BAR)
-            addView(Kit.hairline(c, Deco.BORDER))
-            addView(tabRow)
+            }
+            tabBar.addView(cell, Kit.lp(0, Kit.MATCH, weight = 1f))
+            tabViews[t] = cell to label
         }
 
         val column = Kit.column(c).apply {
             addView(header)
-            addView(Kit.hairline(c, Deco.BORDER))
+            addView(Kit.hairline(c, Deco.BORDER_SOFT))
             addView(content, Kit.lp(h = 0, weight = 1f))
-            addView(tabBar)
         }
+        content.clipToPadding = false
 
         notice = Kit.text(c, null, 14f, Deco.TEXT).apply {
-            background = Deco.box(c, 0xF20D1422.toInt(), Deco.BORDER_STRONG, 16f)
+            background = Deco.glass(c, 16f, GlassDrawable.Tone.BAR)
             setPadding(Deco.dpi(c, 18), Deco.dpi(c, 14), Deco.dpi(c, 18), Deco.dpi(c, 14))
             visibility = View.GONE
             setOnClickListener {
@@ -317,19 +334,27 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(Deco.BG)
             addView(stage, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
             addView(column, FrameLayout.LayoutParams(Kit.MATCH, Kit.MATCH))
+            addView(tabBar, FrameLayout.LayoutParams(Kit.MATCH, Deco.dpi(c, TAB_BAR_DP), Gravity.BOTTOM).apply {
+                val m = Deco.dpi(c, TAB_BAR_MARGIN)
+                setMargins(m, 0, m, m)
+            })
             addView(notice, FrameLayout.LayoutParams(Kit.MATCH, Kit.WRAP, Gravity.BOTTOM).apply {
                 val m = Deco.dpi(c, 16)
-                setMargins(m, m, m, Deco.dpi(c, 96))
+                setMargins(m, m, m, Deco.dpi(c, TAB_BAR_DP + TAB_BAR_MARGIN + 12))
             })
         }
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             header.setPadding(header.paddingLeft, bars.top + Deco.dpi(c, HEADER_TOP), header.paddingRight, header.paddingBottom)
             stage.ceiling = bars.top
-            tabBar.setPadding(0, 0, 0, bars.bottom)
-            (notice.layoutParams as FrameLayout.LayoutParams).bottomMargin = bars.bottom + Deco.dpi(c, 96)
+            (tabBar.layoutParams as FrameLayout.LayoutParams).bottomMargin = bars.bottom + Deco.dpi(c, TAB_BAR_MARGIN)
+            tabBar.requestLayout()
+            content.setPadding(0, 0, 0, bars.bottom)
+            (notice.layoutParams as FrameLayout.LayoutParams).bottomMargin = bars.bottom + Deco.dpi(c, TAB_BAR_DP + TAB_BAR_MARGIN + 12)
             insets
         }
+        // Glass follows the stage's light as pages scroll under it.
+        root.viewTreeObserver.addOnScrollChangedListener { Stagelight.refresh() }
         select(Tab.CAMERA)
         return root
     }
@@ -339,7 +364,7 @@ class MainActivity : AppCompatActivity() {
         tab = t
         tabViews.forEach { (k, v) ->
             val on = k == t
-            v.first.background = if (on) Deco.box(this, Deco.AMBER, 0, 1f) else null
+            v.first.background = if (on) Deco.glass(this, -1f, GlassDrawable.Tone.LENS) else null
             v.second.setTextColor(if (on) Deco.TEXT else Deco.DIM)
             tabIcons[k]?.tint = if (on) Deco.AMBER_LIGHT else Deco.DIM
         }
@@ -353,17 +378,29 @@ class MainActivity : AppCompatActivity() {
         val state = session.state.value
         val connected = state as? ConnState.Connected
 
-        title.text = connected?.info?.displayName ?: "No camera"
-        val (dot, label) = when (state) {
+        connected?.info?.displayName?.let { lastCamera = it }
+        // On the camera's Wi-Fi its Bluetooth is off: the header still names it, and says how it's reached.
+        val wifiPhase = wifi.phase.value
+        val onWifi = connected == null && cameraPage != CameraPage.STATUS && wifiPhase !is WifiPhase.Idle && wifiPhase !is WifiPhase.Failed
+        title.text = connected?.info?.displayName ?: if (onWifi) lastCamera ?: "Camera" else "No camera"
+        val (dot, label) = if (onWifi) {
+            when (wifiPhase) {
+                WifiPhase.Remote -> Deco.AMBER to "Remote · Wi-Fi"
+                WifiPhase.Photos -> Deco.AMBER to "Photos · Wi-Fi"
+                else -> Deco.AMBER to "Joining the camera's Wi-Fi"
+            }
+        } else when (state) {
             is ConnState.Connected -> Deco.GREEN to listOfNotNull("Connected", connected?.info?.model, connected?.info?.firmware?.let { "FW $it" }).joinToString(" · ")
             is ConnState.Connecting -> Deco.AMBER to "Connecting"
             is ConnState.Scanning -> Deco.AMBER to if (state.active) "Searching" else "Offline"
             is ConnState.Error -> Deco.RED to "Not connected"
             is ConnState.Idle -> Deco.DIM to "Offline"
         }
-        statusDot.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(dot)
+        (statusDot.background as? LedDrawable)?.let {
+            if (it.color != dot) {
+                it.color = dot
+                it.invalidateSelf()
+            }
         }
         statusText.text = label
 
@@ -752,8 +789,9 @@ class MainActivity : AppCompatActivity() {
     private companion object {
         /** Room above the title for the stage's ceiling lamps, in dp. */
         const val HEADER_TOP = 24
-        /** The tab bar: the night at 85%, so the haze shows faintly through it. */
-        const val TAB_BAR = 0xD9070A10.toInt()
+        /** The floating tab bar's height and its margin from the screen's edges, in dp. */
+        const val TAB_BAR_DP = 70
+        const val TAB_BAR_MARGIN = 14
         /** A camera backup is a few KB compressed, about 70 KB unpacked. */
         const val MAX_IMPORT_BYTES = 2 * 1024 * 1024
         /** Longest side the camera picture is kept at. */
