@@ -316,8 +316,9 @@ object Kit {
             trackInactiveTintList = ColorStateList.valueOf(Deco.BORDER_STRONG)
             thumbTintList = ColorStateList.valueOf(Deco.AMBER_LIGHT)
             haloTintList = ColorStateList.valueOf(Deco.KEY_GLASS_HI)
-            // A squircle thumb, like every other shape.
-            setCustomThumbDrawable(SquircleDrawable(0xFFF6E3CB.toInt(), 0, 0f, Deco.dp(c, 5.5f)))
+            // A squircle thumb, like every other shape (if the slider won't take it, its own round one stays).
+            runCatching { setCustomThumbDrawable(SquircleDrawable(0xFFF6E3CB.toInt(), 0, 0f, Deco.dp(c, 5.5f))) }
+                .onFailure { com.fujiapp.remote.util.AppLog.add("slider thumb: ${it.message}") }
             addOnChangeListener { _, v, fromUser ->
                 valueText.text = format(v)
                 if (fromUser) onChange(v)

@@ -572,8 +572,19 @@ fun squirclePath(path: android.graphics.Path, r: RectF, radius: Float, smoothing
     path.close()
 }
 
-/** A plain squircle: a fill and an optional hairline (Deco.box), for small solid shapes. */
+/**
+ * A plain squircle: a fill and an optional hairline (Deco.box), for small solid shapes. It can be
+ * copied ([getConstantState]): Material's slider copies the thumb it's given, and a drawable that
+ * can't be copied crashes it.
+ */
 class SquircleDrawable(private val fill: Int, private val stroke: Int, private val strokeWidth: Float, private val radius: Float) : Drawable() {
+    private val state = object : ConstantState() {
+        override fun newDrawable(): Drawable = SquircleDrawable(fill, stroke, strokeWidth, radius)
+        override fun getChangingConfigurations(): Int = 0
+    }
+
+    override fun getConstantState(): ConstantState = state
+
     private val path = android.graphics.Path()
     private val edge = android.graphics.Path()
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
