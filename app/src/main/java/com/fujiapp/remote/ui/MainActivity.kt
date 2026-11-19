@@ -128,7 +128,7 @@ class MainActivity : AppCompatActivity() {
             if (uri != null) loadLabPhoto(uri)
         }
 
-    /** A RAW (RAF) to develop on the camera. */
+    /** A RAW (RAF): for the Lab's phone preview, or to develop on the camera (then [afterRaf] carries on). */
     private val pickRaf =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
             val then = afterRaf
@@ -141,11 +141,12 @@ class MainActivity : AppCompatActivity() {
                 return@registerForActivityResult
             }
             developer.useRaf(uri)
-            recipesScreen.lab.useRafPicture(uri)
+            recipesScreen.lab.useRafPicture(uri, forCamera = then != null)
             then?.invoke()
         }
 
-    fun pickRawFile(then: () -> Unit) {
+    /** Pick a RAF; with [then], it's for developing on the camera, which [then] goes on to do. */
+    fun pickRawFile(then: (() -> Unit)?) {
         afterRaf = then
         pickRaf.launch(arrayOf("image/x-fuji-raf", "image/*", "application/octet-stream"))
     }
@@ -557,12 +558,12 @@ class MainActivity : AppCompatActivity() {
     private fun loadLabPhoto(uri: Uri) {
         lifecycleScope.launch {
             val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { decodeScaled(uri, LabScreen.PHOTO_MAX) }
-            if (bitmap != null) recipesScreen.lab.usePhoto(bitmap) else showNotice("Couldn't open that picture.")
+            if (bitmap != null) recipesScreen.lab.usePhoto(bitmap, uri) else showNotice("Couldn't open that picture.")
         }
     }
 
     /** Decode a picture no larger than [max] pixels on its long side, as a bitmap whose pixels can be read. */
-    private fun decodeScaled(uri: Uri, max: Int): android.graphics.Bitmap? = runCatching {
+    fun decodeScaled(uri: Uri, max: Int): android.graphics.Bitmap? = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(contentResolver, uri)) { d, info, _ ->
                 val w = info.size.width

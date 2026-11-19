@@ -2,6 +2,7 @@ package com.fujiapp.remote.ui
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.net.Uri
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
@@ -21,13 +22,17 @@ import com.fujiapp.remote.preview.PreviewSource
 import com.fujiapp.remote.preview.RecipePreview
 import com.fujiapp.remote.preview.SampleScene
 import com.fujiapp.remote.preview.Vectorscope
+import com.fujiapp.remote.recipe.DrPriority
 import com.fujiapp.remote.recipe.DynamicRange
 import com.fujiapp.remote.recipe.Effect
 import com.fujiapp.remote.recipe.FilmSim
 import com.fujiapp.remote.recipe.Grain
 import com.fujiapp.remote.recipe.Recipe
+import com.fujiapp.remote.recipe.ShotSettings
 import com.fujiapp.remote.recipe.WhiteBalance
 import com.fujiapp.remote.usb.DevelopState
+import com.fujiapp.remote.util.AppLog
+import com.fujiapp.remote.util.PictureSaver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -39,8 +44,9 @@ import kotlin.math.roundToInt
 /**
  * Try a recipe on a picture. The preview stays in view while the settings, grouped in five tabs
  * (Film, Color, Light, Tone, Detail), change it; nothing needs scrolling. The sample is a color
- * chart with skin tones, and the vectorscope shows where the colors land. The preview
- * approximates the look on the phone: the camera's own rendering will differ in detail.
+ * chart with skin tones, a photo, or a RAW (its own JPEG), and the vectorscope shows where the
+ * colors land. The preview approximates the look on the phone, with no camera needed: the camera's
+ * own rendering will differ in detail, and with the camera on USB it renders a RAW exactly.
  */
 @SuppressLint("ClickableViewAccessibility")
 class LabScreen(private val a: MainActivity) {
@@ -69,6 +75,21 @@ class LabScreen(private val a: MainActivity) {
     private var autoStarted = false
     /** An automatic development failed: wait for the Camera button before trying again. */
     private var autoFailed = false
+    /**
+     * The camera develops this picture: the Camera button was used on it. A RAW opened from
+     * Picture stays on the phone until then, even with the camera plugged in.
+     */
+    private var cameraWanted = false
+    /** The RAW whose JPEG is the picture, if it is one. */
+    private var rafUri: Uri? = null
+    /** The settings the RAW's JPEG was shot with, when its Exif says. */
+    private var shot: Recipe? = null
+    /** The picture's name, for saving. */
+    private var pictureName = ""
+    /** The picture again at a given size (longest side), for saving the phone's version; null for the chart. */
+    private var reload: (suspend (Int) -> Bitmap?)? = null
+    private var pictureJob: Job? = null
+    private var saving = false
 
     private val image = RoundedImageView(c, Deco.dp(c, 12f)).apply {
         scaleType = ImageView.ScaleType.FIT_CENTER
@@ -137,6 +158,13 @@ class LabScreen(private val a: MainActivity) {
     private val dynamicRange = Kit.Chips(c, listOf("Auto", "DR100", "DR200", "DR400")) { i -> change(recipe.copy(dynamicRange = DynamicRange.entries[i])) }
     private val highlight = Kit.SliderRow(c, "Highlight", -2f, 4f, 0.5f, ::signedHalf) { change(recipe.copy(highlight = it.toDouble())) }
     private val shadow = Kit.SliderRow(c, "Shadow", -2f, 4f, 0.5f, ::signedHalf) { change(recipe.copy(shadow = it.toDouble())) }
+    private val drPriority = Kit.Chips(c, listOf("Off", "Weak", "Strong", "Auto")) { i ->
+        val p = DrPriority.entries[i]
+        // The camera sets the tones while it's on, so they go back to 0.
+        change(if (p == DrPriority.OFF) recipe.copy(drPriority = p) else recipe.copy(drPriority = p, highlight = 0.0, shadow = 0.0))
+    }
+    private val drPriorityRow = labelled("D-range priority", drPriority.view)
+    private val tonesNote = Kit.text(c, "D-range priority sets highlight and shadow itself.", 13f, Deco.MUTED)
     private val color = Kit.SliderRow(c, "Color", -4f, 4f, 1f, ::signedInt) { change(recipe.copy(color = it.roundToInt())) }
     private val sharpness = Kit.SliderRow(c, "Sharpness", -4f, 4f, 1f, ::signedInt) { change(recipe.copy(sharpness = it.roundToInt())) }
     private val noise = Kit.SliderRow(c, "High ISO NR", -4f, 4f, 1f, ::signedInt) { change(recipe.copy(noiseReduction = it.roundToInt())) }
@@ -152,7 +180,7 @@ class LabScreen(private val a: MainActivity) {
         group(labelled("Film simulation", filmSim), grainRow, toneWc.view, toneMg.view),
         group(color.view, chromeRow, chromeBlueRow, monoNote),
         group(whiteBalance.view, kelvin.view, wbRed.view, wbBlue.view),
-        group(labelled("Dynamic range", dynamicRange.view), highlight.view, shadow.view),
+        group(labelled("Dynamic range", dynamicRange.view), drPriorityRow, highlight.view, shadow.view, tonesNote),
         group(sharpness.view, clarity.view, noise.view),
     )
     private val controls = FrameLayout(c)
@@ -181,8 +209,12 @@ class LabScreen(private val a: MainActivity) {
         addView(Kit.row(c).apply {
             addView(name, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 8) })
             addView(small("Picture") {
-                a.choose("Picture", listOf("Color chart with skin tones", "A photo from the phone"), -1) { i ->
-                    if (i == 0) useSample() else a.pickLabPhoto()
+                a.choose("Picture", listOf("Color chart with skin tones", "A photo from the phone", "A RAW file (RAF), no camera needed"), -1) { i ->
+                    when (i) {
+                        0 -> useSample()
+                        1 -> a.pickLabPhoto()
+                        else -> a.pickRawFile(null)
+                    }
                 }
             })
             addView(small("Library") { a.recipeFlow.chooseStart() })
@@ -199,7 +231,7 @@ class LabScreen(private val a: MainActivity) {
         }, Kit.lp(h = 0, weight = 1f).apply { topMargin = Deco.dpi(c, 4) })
         addView(Kit.row(c).apply {
             addView(Kit.button(c, "Load into a slot", icon = LineIcon.Kind.UPLOAD, compact = true) { a.recipeFlow.load(recipe) }, Kit.lp(0, weight = 1f).apply { marginEnd = Deco.dpi(c, 8) })
-            addView(Kit.button(c, "Save", Kit.Style.SECONDARY, LineIcon.Kind.CHECK, compact = true) { a.recipeFlow.saveMine(recipe) }, Kit.lp(Kit.WRAP))
+            addView(Kit.button(c, "Save", Kit.Style.SECONDARY, LineIcon.Kind.CHECK, compact = true) { save() }, Kit.lp(Kit.WRAP))
         }, Kit.lp(top = Deco.dpi(c, 6)))
     }
 
@@ -209,7 +241,12 @@ class LabScreen(private val a: MainActivity) {
                 MotionEvent.ACTION_DOWN -> {
                     showingOriginal = true
                     image.setImageBitmap(original)
-                    status.text = if (asShot) "As shot (the RAW's own JPEG)" else "Original"
+                    val s = shot
+                    status.text = when {
+                        !asShot -> "Original"
+                        s != null -> "As shot, in ${s.filmSim.label}"
+                        else -> "As shot (the RAW's own JPEG)"
+                    }
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     showingOriginal = false
@@ -229,14 +266,15 @@ class LabScreen(private val a: MainActivity) {
         a.lifecycleScope.launch {
             a.developer.state.collect { s ->
                 when (s) {
-                    is DevelopState.Working -> if (!showingOriginal && (developed != null || autoStarted)) {
+                    is DevelopState.Working -> if (cameraWanted && !showingOriginal && (developed != null || autoStarted)) {
                         status.text = if (s.message.startsWith("Uploading") || s.message.startsWith("Connecting")) s.message else DEVELOPING
                     }
                     is DevelopState.Done -> if (s !== lastDone) {
                         lastDone = s
                         autoStarted = false
                         autoFailed = false
-                        showDeveloped(s.jpeg, s.recipe)
+                        // Not if another picture was chosen while the camera worked.
+                        if (cameraWanted) showDeveloped(s.jpeg, s.recipe)
                     }
                     is DevelopState.Failed -> {
                         if (autoStarted) {
@@ -259,7 +297,7 @@ class LabScreen(private val a: MainActivity) {
 
     private fun idleStatus(): String = when {
         developed != null -> "Developed by the camera · hold for the original"
-        asShot -> "Phone preview on the RAW's JPEG · hold for the original"
+        asShot -> "Phone approximation · hold for as shot"
         else -> "Hold to compare"
     }
 
@@ -268,6 +306,7 @@ class LabScreen(private val a: MainActivity) {
      * closes the session) the camera is still plugged in and the RAW can go back up by itself.
      */
     private fun canDevelop(): Boolean {
+        if (!cameraWanted) return false
         val dev = a.developer
         return dev.ready || (dev.raf != null && !autoFailed && !a.transfer.busy && a.transfer.cameraPlugged())
     }
@@ -349,12 +388,7 @@ class LabScreen(private val a: MainActivity) {
         if (!same(r, recipe) && a.developer.ready) return
         a.lifecycleScope.launch {
             val (bmp, scopePixels) = withContext(Dispatchers.Default) {
-                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
-                var sample = 1
-                while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= DEVELOPED_MAX) sample *= 2
-                val b = android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
-                    ?: return@withContext null to null
+                val b = decodeJpeg(jpeg, DEVELOPED_MAX, ShotSettings.read(jpeg)?.orientation ?: 1) ?: return@withContext null to null
                 val px = IntArray(b.width * b.height).also { b.getPixels(it, 0, b.width, 0, 0, b.width, b.height) }
                 b to IntArray(SCOPE * SCOPE).also { Vectorscope.render(px, SCOPE, it) }
             }
@@ -397,47 +431,129 @@ class LabScreen(private val a: MainActivity) {
         kelvin.show(r.whiteBalance == WhiteBalance.KELVIN); kelvin.set(r.kelvin.toFloat())
         wbRed.set(r.wbRed.toFloat()); wbBlue.set(r.wbBlue.toFloat())
         dynamicRange.select(DynamicRange.entries.indexOf(r.dynamicRange))
+        drPriority.select(DrPriority.entries.indexOf(r.drPriority))
+        val manualTones = r.drPriority == DrPriority.OFF
+        highlight.show(manualTones); shadow.show(manualTones)
+        tonesNote.visibility = if (manualTones) View.GONE else View.VISIBLE
         highlight.set(r.highlight.toFloat()); shadow.set(r.shadow.toFloat())
         color.show(!mono); color.set(r.color.toFloat())
         sharpness.set(r.sharpness.toFloat()); noise.set(r.noiseReduction.toFloat()); clarity.set(r.clarity.toFloat())
         updating = false
     }
 
-    fun useSample() = setPicture(asShot = false) { Triple(SAMPLE_W, SAMPLE_H, SampleScene.pixels(SAMPLE_W, SAMPLE_H)) }
+    fun useSample() {
+        forgetPicture()
+        setPicture(asShot = false, shot = null) { Triple(SAMPLE_W, SAMPLE_H, SampleScene.pixels(SAMPLE_W, SAMPLE_H)) }
+    }
 
-    /** The phone preview works on the RAW's own JPEG, so holding and the scope show the same photo. */
-    fun useRafPicture(uri: android.net.Uri) {
+    /** Use a picture from the phone (already scaled down); [uri] loads it again, larger, for saving. */
+    fun usePhoto(bitmap: Bitmap, uri: Uri) {
+        forgetPicture()
+        pictureName = a.developer.nameOf(uri).substringBeforeLast('.').takeIf { it != "RAW" } ?: "photo"
+        reload = { max -> withContext(Dispatchers.IO) { a.decodeScaled(uri, max) } }
+        setPicture(asShot = false, shot = null) {
+            val px = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(px, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            Triple(bitmap.width, bitmap.height, px)
+        }
+    }
+
+    /** The current picture is going: no RAW, no camera development of it. */
+    private fun forgetPicture() {
+        cameraWanted = false
+        rafUri = null
+        shot = null
+        reload = null
+        pictureName = ""
+    }
+
+    /**
+     * A RAW's own JPEG becomes the picture: the camera's rendering when it was shot. Its Exif says
+     * which settings that was, so the phone takes it back to neutral and renders the recipe from
+     * there, with no camera needed. [forCamera]: the Camera button chose it, to develop it exactly.
+     */
+    fun useRafPicture(uri: Uri, forCamera: Boolean) {
         autoFailed = false
+        val previous = rafUri
+        val previousWanted = cameraWanted
+        rafUri = uri
+        cameraWanted = forCamera
+        val file = a.developer.nameOf(uri)
         a.lifecycleScope.launch {
-            val bitmap = withContext(Dispatchers.IO) { a.developer.embeddedJpeg(uri)?.let { decodeJpeg(it, PHOTO_MAX) } }
-            if (bitmap == null) {
+            val loaded = withContext(Dispatchers.IO) {
+                val jpeg = a.developer.embeddedJpeg(uri) ?: return@withContext null
+                val exif = ShotSettings.read(jpeg)
+                decodeJpeg(jpeg, PHOTO_MAX, exif?.orientation ?: 1)?.let { it to exif }
+            }
+            // Another picture was chosen meanwhile.
+            if (rafUri != uri) return@launch
+            if (loaded == null) {
+                rafUri = previous
+                cameraWanted = previousWanted
                 a.showNotice("Couldn't read the RAW's preview: the phone preview stays on the current picture.")
                 return@launch
             }
-            setPicture(asShot = true) {
+            val (bitmap, exif) = loaded
+            val shotWith = exif?.recipe
+            AppLog.add("lab: RAF $file ${bitmap.width}×${bitmap.height}, shot with ${shotWith?.filmSim ?: "unknown settings"}; ${exif?.describe().orEmpty()}")
+            shot = shotWith
+            pictureName = file.substringBeforeLast('.')
+            reload = { max ->
+                withContext(Dispatchers.IO) {
+                    a.developer.embeddedJpeg(uri)?.let { decodeJpeg(it, max, exif?.orientation ?: 1) }
+                }
+            }
+            setPicture(asShot = true, shot = shotWith) {
                 val px = IntArray(bitmap.width * bitmap.height)
                 bitmap.getPixels(px, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
                 Triple(bitmap.width, bitmap.height, px)
             }
+            if (!forCamera) announceShot(shotWith)
         }
     }
 
-    /** Use a picture from the phone (already scaled down). */
-    fun usePhoto(bitmap: Bitmap) = setPicture(asShot = false) {
-        val px = IntArray(bitmap.width * bitmap.height)
-        bitmap.getPixels(px, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-        Triple(bitmap.width, bitmap.height, px)
+    /** Say how the RAW was shot (what the phone starts from), with its settings one tap away. */
+    private fun announceShot(s: Recipe?) {
+        when {
+            s == null -> a.showNotice("The RAW doesn't say how it was shot: the phone treats its JPEG as neutral (Provia, DR100).")
+            s.filmSim.mono -> a.showNotice(
+                "Shot in ${s.filmSim.label}: its JPEG has no color, so only black-and-white looks show properly.",
+                "Use its settings",
+            ) { load(s.copy(name = pictureName)) }
+            else -> a.showNotice(
+                "Shot in ${s.filmSim.label}, ${dynamicRangeText(s)}. The phone shows recipes on it approximately.",
+                "Use its settings",
+            ) { load(s.copy(name = pictureName)) }
+        }
     }
 
-    private fun setPicture(asShot: Boolean, load: () -> Triple<Int, Int, IntArray>) {
+    private fun dynamicRangeText(s: Recipe): String = when {
+        s.drPriority != DrPriority.OFF -> "D-range priority ${s.drPriority.label.lowercase()}"
+        s.dynamicRange == DynamicRange.AUTO -> "DR auto"
+        else -> s.dynamicRange.label
+    }
+
+    /** The Camera button is developing the chosen RAW: show it here, and develop every change on the camera. */
+    fun cameraDevelops() {
+        val uri = a.developer.raf ?: return
+        autoFailed = false
+        if (rafUri != uri) useRafPicture(uri, forCamera = true) else cameraWanted = true
+    }
+
+    /**
+     * [load] gives the picture as it looks (ARGB); with [shot], it's a camera JPEG shot with those
+     * settings, which the preview takes back to neutral first.
+     */
+    private fun setPicture(asShot: Boolean, shot: Recipe?, load: () -> Triple<Int, Int, IntArray>) {
         developed = null
         developedScope = null
         this.asShot = asShot
-        a.lifecycleScope.launch {
+        pictureJob?.cancel()
+        pictureJob = a.lifecycleScope.launch {
             status.text = "Preparing…"
             val (src, orig) = withContext(Dispatchers.Default) {
                 val (w, h, px) = load()
-                PreviewSource(w, h, px) to createBitmap(w, h).apply { setPixels(px, 0, w, 0, 0, w, h) }
+                PreviewSource(w, h, px, shot) to createBitmap(w, h).apply { setPixels(px, 0, w, 0, 0, w, h) }
             }
             source = src
             original = orig
@@ -446,13 +562,59 @@ class LabScreen(private val a: MainActivity) {
                 val th = maxOf(1, orig.height * tw / orig.width)
                 val small = orig.scale(tw, th)
                 val px = IntArray(tw * th).also { small.getPixels(it, 0, tw, 0, 0, tw, th) }
-                PreviewSource(tw, th, px)
+                PreviewSource(tw, th, px, shot)
             }
             requestThumbs()
             rendered = createBitmap(src.width, src.height)
             scopeBitmap = createBitmap(SCOPE, SCOPE)
             fitFrame(src.width, src.height)
             requestRender(immediate = true)
+        }
+    }
+
+    /** Save the recipe, or the picture: the phone's version, or the camera's while it shows. */
+    private fun save() {
+        val options = mutableListOf<Pair<String, () -> Unit>>("The recipe, to My recipes" to { a.recipeFlow.saveMine(recipe) })
+        if (reload != null) options += "The picture, as the phone shows it" to { savePicture() }
+        if (developed != null && a.developer.state.value is DevelopState.Done) {
+            options += "The picture the camera developed" to {
+                val name = runCatching { a.developer.saveLast() }.getOrNull()
+                a.showNotice(if (name != null) "Saved to Pictures/Fuji Remote: $name" else "Couldn't save the picture.")
+            }
+        }
+        if (options.size == 1) options[0].second() else a.choose("Save", options.map { it.first }, -1) { options[it].second() }
+    }
+
+    /** Render the recipe on the picture at a larger size and save it as a JPEG in Pictures/Fuji Remote. */
+    private fun savePicture() {
+        val load = reload ?: return
+        if (saving) return
+        val problems = recipe.problems()
+        if (problems.isNotEmpty()) {
+            a.showNotice(problems.first())
+            return
+        }
+        saving = true
+        val r = recipe
+        val s = shot
+        val name = PictureSaver.fileName(pictureName.ifBlank { "lab" }, r.cameraName, "phone")
+        a.showNotice("Saving the picture…")
+        a.lifecycleScope.launch {
+            val saved = runCatching {
+                val bitmap = load(EXPORT_MAX) ?: return@runCatching null
+                withContext(Dispatchers.Default) {
+                    val w = bitmap.width
+                    val h = bitmap.height
+                    val px = IntArray(w * h).also { bitmap.getPixels(it, 0, w, 0, 0, w, h) }
+                    RecipePreview.render(PreviewSource(w, h, px, s), r, px)
+                    val jpeg = java.io.ByteArrayOutputStream().also { out ->
+                        createBitmap(w, h).apply { setPixels(px, 0, w, 0, 0, w, h) }.compress(Bitmap.CompressFormat.JPEG, 92, out)
+                    }.toByteArray()
+                    withContext(Dispatchers.IO) { PictureSaver.saveJpeg(a, name, jpeg) }
+                }
+            }.onFailure { AppLog.error("lab save", it) }.getOrNull()
+            saving = false
+            a.showNotice(if (saved != null) "Saved to Pictures/Fuji Remote: $saved (the phone's approximation)" else "Couldn't save the picture.")
         }
     }
 
@@ -524,8 +686,8 @@ class LabScreen(private val a: MainActivity) {
             FilmSim.MONOCHROME_G to "Mono G", FilmSim.SEPIA to "Sepia",
         )
 
-        /** Decode a JPEG to at most [max] pixels on its long side. */
-        fun decodeJpeg(jpeg: ByteArray, max: Int): Bitmap? {
+        /** Decode a JPEG to at most [max] pixels on its long side, turned upright by its Exif [orientation]. */
+        fun decodeJpeg(jpeg: ByteArray, max: Int, orientation: Int = 1): Bitmap? {
             val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
             android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
@@ -533,13 +695,21 @@ class LabScreen(private val a: MainActivity) {
             while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= max) sample *= 2
             val b = android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
                 ?: return null
-            val scale = max.toFloat() / maxOf(b.width, b.height)
-            return if (scale >= 1f) b else b.scale(maxOf(1, (b.width * scale).toInt()), maxOf(1, (b.height * scale).toInt()))
+            val scale = minOf(1f, max.toFloat() / maxOf(b.width, b.height))
+            val degrees = when (orientation) { 3 -> 180f; 6 -> 90f; 8 -> 270f; else -> 0f }
+            if (scale >= 1f && degrees == 0f) return b
+            val m = android.graphics.Matrix().apply {
+                postScale(scale, scale)
+                postRotate(degrees)
+            }
+            return Bitmap.createBitmap(b, 0, 0, b.width, b.height, m, true)
         }
         const val SAMPLE_W = 900
         const val SAMPLE_H = 600
         /** Longest side a photo is scaled to for the preview. */
         const val PHOTO_MAX = 960
+        /** Longest side of a saved phone rendering. */
+        private const val EXPORT_MAX = 2048
         private const val SCOPE = 256
         private const val RENDER_DEBOUNCE_MS = 50L
         private val WB_CHOICES = listOf(

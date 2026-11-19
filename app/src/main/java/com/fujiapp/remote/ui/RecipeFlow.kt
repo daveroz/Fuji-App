@@ -100,6 +100,8 @@ class RecipeFlow(private val a: MainActivity) {
 
     private fun connectAndDevelop(recipe: Recipe) {
         val go = {
+            // The Lab shows this RAW and, from now on, develops each change on the camera.
+            a.recipesScreen.lab.cameraDevelops()
             a.developer.develop(recipe)
             watchDevelop()
         }
