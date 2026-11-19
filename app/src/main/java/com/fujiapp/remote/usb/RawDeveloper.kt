@@ -1,17 +1,14 @@
 package com.fujiapp.remote.usb
 
-import android.content.ContentValues
 import android.content.Context
 import android.hardware.usb.UsbManager
 import android.net.Uri
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
 import android.provider.OpenableColumns
 import com.fujiapp.remote.recipe.BankCodec
 import com.fujiapp.remote.recipe.ConversionProfile
 import com.fujiapp.remote.recipe.Recipe
 import com.fujiapp.remote.util.AppLog
+import com.fujiapp.remote.util.PictureSaver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +18,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.io.IOException
 
 /**
@@ -195,21 +191,7 @@ class RawDeveloper(context: Context) {
     /** Save the last developed picture in Pictures/Fuji Remote. */
     fun saveLast(): String? {
         val done = _state.value as? DevelopState.Done ?: return null
-        val name = "${done.rafName.substringBeforeLast('.')}-${done.recipe.cameraName.replace(' ', '-')}.jpg"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/Fuji Remote")
-            }
-            val uri = app.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
-            app.contentResolver.openOutputStream(uri)?.use { it.write(done.jpeg) } ?: return null
-        } else {
-            val dir = File(app.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Fuji Remote").apply { mkdirs() }
-            File(dir, name).writeBytes(done.jpeg)
-        }
-        AppLog.add("develop: saved $name")
-        return name
+        return PictureSaver.saveJpeg(app, PictureSaver.fileName(done.rafName.substringBeforeLast('.'), done.recipe.cameraName), done.jpeg)
     }
 
     /**
