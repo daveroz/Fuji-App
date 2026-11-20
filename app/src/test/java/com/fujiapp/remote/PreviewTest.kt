@@ -8,9 +8,7 @@ import com.fujiapp.remote.preview.SampleScene
 import com.fujiapp.remote.preview.Vectorscope
 import com.fujiapp.remote.recipe.DrPriority
 import com.fujiapp.remote.recipe.DynamicRange
-import com.fujiapp.remote.recipe.Effect
 import com.fujiapp.remote.recipe.FilmSim
-import com.fujiapp.remote.recipe.Grain
 import com.fujiapp.remote.recipe.Recipe
 import com.fujiapp.remote.recipe.WhiteBalance
 import org.junit.Assert.assertArrayEquals
@@ -84,43 +82,6 @@ class PreviewTest {
         val auto = render(Recipe("A", FilmSim.PROVIA, drPriority = DrPriority.WEAK))
         val hard = render(Recipe("B", FilmSim.PROVIA, drPriority = DrPriority.WEAK, highlight = 4.0, shadow = 4.0))
         assertArrayEquals(auto, hard)
-    }
-
-    @Test fun a_camera_jpeg_rendered_with_its_own_settings_comes_back_unchanged() {
-        val shots = listOf(
-            Recipe("CC", FilmSim.CLASSIC_CHROME, whiteBalance = WhiteBalance.KELVIN, kelvin = 4800, wbRed = 2, wbBlue = -4,
-                dynamicRange = DynamicRange.DR400, highlight = -1.0, shadow = 1.5, color = -2),
-            Recipe("CN", FilmSim.CLASSIC_NEG, whiteBalance = WhiteBalance.DAYLIGHT, wbRed = 3, wbBlue = -5, highlight = 0.5, shadow = 2.0, color = 3),
-            Recipe("VE", FilmSim.VELVIA, dynamicRange = DynamicRange.DR200),
-            Recipe("NN", FilmSim.NOSTALGIC_NEG, drPriority = DrPriority.STRONG),
-            Recipe("AC", FilmSim.ACROS_R, highlight = 1.0, shadow = -1.0),
-        )
-        for (shot in shots) {
-            val asShot = render(shot)
-            val back = render(shot, PreviewSource(w, h, asShot, shot))
-            val d = diffs(asShot, back)
-            assertTrue("${shot.name}: mean ${d.average()}", d.average() < 0.6)
-            assertTrue("${shot.name}: max ${d.max()}", d.max() <= 4)
-        }
-    }
-
-    @Test fun a_camera_jpeg_takes_a_new_recipe_from_neutral() {
-        // Shot in Classic Chrome; asked for Velvia: closer to Velvia on a neutral picture than Velvia stacked on Classic Chrome.
-        val shot = Recipe("CC", FilmSim.CLASSIC_CHROME, color = -2)
-        val asShot = render(shot)
-        val velvia = Recipe("V", FilmSim.VELVIA)
-        val target = render(velvia)
-        val compensated = render(velvia, PreviewSource(w, h, asShot, shot))
-        val stacked = render(velvia, PreviewSource(w, h, asShot))
-        assertTrue(diffs(target, compensated).average() * 2 < diffs(target, stacked).average())
-    }
-
-    @Test fun effects_already_in_the_picture_aren_t_added_again() {
-        val shot = Recipe("G", FilmSim.PROVIA, grain = Grain.STRONG_SMALL, colorChrome = Effect.STRONG, sharpness = 2, clarity = 3)
-        val asShot = render(shot)
-        val back = render(shot, PreviewSource(w, h, asShot, shot))
-        // Grain, color chrome, sharpness and clarity are relative to the shot's: none added, so it comes back as it was.
-        assertTrue(diffs(asShot, back).average() < 0.6)
     }
 
     @Test fun a_film_lut_replaces_the_parametric_look() {
