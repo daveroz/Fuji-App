@@ -14,18 +14,13 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 /**
  * An image ready for previewing: its pixels (ARGB) plus what renders reuse: brightness, two
  * blurred copies of it (for clarity and sharpness) and two grain textures, each made the first
  * time a recipe needs it.
- *
- * [shot] is set when the pixels are a camera JPEG (a RAW's own picture) whose settings are known:
- * the picture is then taken back to neutral once, here, so a recipe renders on it as it would on
- * a neutral shot, and the recipe's local effects count from what the picture already has.
  */
-class PreviewSource(val width: Int, val height: Int, val pixels: IntArray, val shot: Recipe? = null) {
+class PreviewSource(val width: Int, val height: Int, val pixels: IntArray) {
     internal val luma: FloatArray by lazy {
         FloatArray(pixels.size) { i ->
             val p = pixels[i]
@@ -45,8 +40,6 @@ class PreviewSource(val width: Int, val height: Int, val pixels: IntArray, val s
         for (i in coarse.indices) coarse[i] /= peak
         coarse
     }
-    /** With [shot]: the picture in linear light, its look undone (red, green, blue per pixel). */
-    internal val neutral: FloatArray? = shot?.let { RecipePreview.neutralize(pixels, it) }
 }
 
 /**
@@ -225,21 +218,6 @@ object RecipePreview {
             return table[i] + (table[i + 1] - table[i]) * (f - i)
         }
 
-        /** The input that gives [y] (the lowest one, where the curve is flat). */
-        fun invert(y: Float): Float {
-            if (y <= table[0]) return 0f
-            if (y >= top) return 1f
-            var lo = 0
-            var hi = SIZE
-            while (hi - lo > 1) {
-                val mid = (lo + hi) ushr 1
-                if (table[mid] < y) lo = mid else hi = mid
-            }
-            val span = table[hi] - table[lo]
-            val t = if (span > 0f) (y - table[lo]) / span else 0f
-            return (lo + t) / SIZE
-        }
-
         companion object {
             const val SIZE = 4096
             const val KNEE = 0.6f
@@ -288,16 +266,12 @@ object RecipePreview {
         val mix = if (lut != null) null else look.mix
         val grey = if (lut != null) null else look.grey
 
-        // A camera JPEG already has its sharpness, clarity, noise reduction, grain and color chrome:
-        // count from those (grain and color chrome can only be added).
-        val base = src.shot
-        val clarity = (recipe.clarity - (base?.clarity ?: 0)) * 0.045f
-        val sharp = (recipe.sharpness - (base?.sharpness ?: 0)) * 0.22f
-        val smooth = (max(0, recipe.noiseReduction) - max(0, base?.noiseReduction ?: 0)) * 0.06f
-        val cce = max(0f, effect(recipe.colorChrome) - (base?.let { effect(it.colorChrome) } ?: 0f))
-        val ccb = max(0f, effect(recipe.colorChromeBlue) - (base?.let { effect(it.colorChromeBlue) } ?: 0f))
-        val grainHave = base?.let { grainAmp(it.grain) } ?: 0f
-        val grainAmp = sqrt(max(0f, grainAmp(recipe.grain).let { it * it } - grainHave * grainHave))
+        val clarity = recipe.clarity * 0.045f
+        val sharp = recipe.sharpness * 0.22f
+        val smooth = max(0, recipe.noiseReduction) * 0.06f
+        val cce = effect(recipe.colorChrome)
+        val ccb = effect(recipe.colorChromeBlue)
+        val grainAmp = grainAmp(recipe.grain)
         val grainTex = when {
             grainAmp <= 0f -> null
             recipe.grain == Grain.WEAK_LARGE || recipe.grain == Grain.STRONG_LARGE -> src.grainCoarse
@@ -309,24 +283,14 @@ object RecipePreview {
         val blurSmall = if (sharp != 0f || smooth != 0f) src.blurSmall else null
         val wc = recipe.monoWarmCool * 0.0045f
         val mg = recipe.monoMagentaGreen * 0.004f
-        val neutral = src.neutral
         val lutOut = FloatArray(3)
 
         for (i in src.pixels.indices) {
             // Linear light, white balanced.
-            var r: Float
-            var g: Float
-            var b: Float
-            if (neutral != null) {
-                r = neutral[i * 3] * wb[0]
-                g = neutral[i * 3 + 1] * wb[1]
-                b = neutral[i * 3 + 2] * wb[2]
-            } else {
-                val p = src.pixels[i]
-                r = DECODE8[(p shr 16) and 0xFF] * wb[0]
-                g = DECODE8[(p shr 8) and 0xFF] * wb[1]
-                b = DECODE8[p and 0xFF] * wb[2]
-            }
+            val p = src.pixels[i]
+            var r = DECODE8[(p shr 16) and 0xFF] * wb[0]
+            var g = DECODE8[(p shr 8) and 0xFF] * wb[1]
+            var b = DECODE8[p and 0xFF] * wb[2]
 
             // The film simulation's color.
             if (lut != null) {
@@ -396,77 +360,6 @@ object RecipePreview {
 
             out[i] = (0xFF shl 24) or (pack(r) shl 16) or (pack(g) shl 8) or pack(b)
         }
-    }
-
-    /**
-     * Take a camera JPEG back to neutral: undo, as this preview models them, the split toning,
-     * saturation, tone curve, color mix and white balance it was [shot] with. The result is linear
-     * light (red, green, blue per pixel), not clipped, so rendering it with the same recipe gives
-     * the picture back. Color chrome, sharpness, grain and the like stay in the picture; a
-     * monochrome shot has no color to recover, so only its tone curve and toning are undone.
-     */
-    fun neutralize(pixels: IntArray, shot: Recipe): FloatArray {
-        val look = look(shot.filmSim)
-        val tone = tone(look.contrast, shot)
-        val out = FloatArray(pixels.size * 3)
-        if (shot.filmSim.mono) {
-            for (i in pixels.indices) {
-                val p = pixels[i]
-                val l = (0.299f * ((p shr 16) and 0xFF) + 0.587f * ((p shr 8) and 0xFF) + 0.114f * (p and 0xFF)) / 255f
-                val v = tone.invert(decode(l))
-                out[i * 3] = v; out[i * 3 + 1] = v; out[i * 3 + 2] = v
-            }
-            return out
-        }
-        val wb = whiteBalance(shot)
-        // Very low saturation can't be undone without blowing up the JPEG's noise: undo at most this much.
-        val saturation = max(0.3f, look.saturation * (1f + 0.12f * shot.color))
-        val unmix = look.mix?.let { invert3(it) }
-        val st = look.shadowTint
-        val ht = look.highlightTint
-        for (i in pixels.indices) {
-            val p = pixels[i]
-            var r = ((p shr 16) and 0xFF) / 255f
-            var g = ((p shr 8) and 0xFF) / 255f
-            var b = (p and 0xFF) / 255f
-            val l = 0.299f * r + 0.587f * g + 0.114f * b
-            val lo = (1f - l) * (1f - l)
-            val up = l * l
-            r = decode(r - st[0] * lo - ht[0] * up)
-            g = decode(g - st[1] * lo - ht[1] * up)
-            b = decode(b - st[2] * lo - ht[2] * up)
-
-            val y = LR * r + LG * g + LB * b
-            r = tone.invert(y + (r - y) / saturation)
-            g = tone.invert(y + (g - y) / saturation)
-            b = tone.invert(y + (b - y) / saturation)
-
-            if (unmix != null) {
-                val nr = unmix[0] * r + unmix[1] * g + unmix[2] * b
-                val ng = unmix[3] * r + unmix[4] * g + unmix[5] * b
-                val nb = unmix[6] * r + unmix[7] * g + unmix[8] * b
-                r = nr; g = ng; b = nb
-            }
-            out[i * 3] = r / wb[0]
-            out[i * 3 + 1] = g / wb[1]
-            out[i * 3 + 2] = b / wb[2]
-        }
-        return out
-    }
-
-    /** The inverse of a row-major 3×3 matrix, or null if it has none. */
-    private fun invert3(m: FloatArray): FloatArray? {
-        val a = m[0]; val b = m[1]; val c = m[2]
-        val d = m[3]; val e = m[4]; val f = m[5]
-        val g = m[6]; val h = m[7]; val k = m[8]
-        val det = a * (e * k - f * h) - b * (d * k - f * g) + c * (d * h - e * g)
-        if (kotlin.math.abs(det) < 1e-6f) return null
-        val s = 1f / det
-        return floatArrayOf(
-            (e * k - f * h) * s, (c * h - b * k) * s, (b * f - c * e) * s,
-            (f * g - d * k) * s, (a * k - c * g) * s, (c * d - a * f) * s,
-            (d * h - e * g) * s, (b * g - a * h) * s, (a * e - b * d) * s,
-        )
     }
 
     private fun pack(v: Float): Int = (v * 255f).roundToInt().coerceIn(0, 255)

@@ -27,7 +27,7 @@ or redistributed.**
 | Tab | What's on it |
 |---|---|
 | **Camera** | Before connecting: find and pair a camera, or reconnect to a paired one. Connected, laid out like Hasselblad's app: a glass panel with the camera's name set wide and a row of spec icons (shots, power, Wi-Fi, firmware), then the **Photos** and **Remote** tiles (Wi-Fi, see below), a readout strip (shots, power, Wi-Fi, firmware), the **remote release** (hold to focus, let go to shoot), and every value the camera reports, decoded and kept live. **State:** power switch, Wi-Fi access point, pictures waiting, why it's busy, card, firmware update. **Camera:** model, name, serial, firmware, model code. **Connection:** paired phones, connect while off, location sync and interval, transfer settings, activity log. **Lens**, and **Technical** details. |
-| **Recipes** | Three sections. **Camera**: the C1–C7 names, read over Bluetooth from the camera's settings file when you open it (about 2 seconds; offline, the newest backup stands in), and, over USB, every setting of every slot. **Library**: 30 recipes after popular film stocks (Portra, Ektar, Gold, Kodachrome, Superia, Pro 400H, Velvia, CineStill, Tri-X, HP5…) and films (Blade Runner 2049, Skyfall, The Matrix, Fury Road, Drive, Amélie, In the Mood for Love, Dune…), each with what the look is, how the settings get there, and how to shoot it. **Lab**: the preview stays on screen while the settings, in five tabs (Film, Color, Light, Tone, Detail), change it; film simulations are a scrolling strip of thumbnails of your picture, each in its look (like a phone camera's filter row), and grain and the effects are one-tap chips; **Library** starts from any recipe; the sample is a color chart (the 24 color-checker patches, eight skin tones, a grey ramp), one of your photos or one of your **RAW files** (no camera needed, see below), and a **vectorscope** in the manner of DaVinci Resolve's shows where every color lands, with the **skin-tone line** to check skin against; **Save** keeps the recipe in My recipes or the picture in Pictures/Fuji Remote. Any recipe can be loaded into a slot. |
+| **Recipes** | Three sections. **Camera**: the C1–C7 names, read over Bluetooth from the camera's settings file when you open it (about 2 seconds; offline, the newest backup stands in), and, over USB, every setting of every slot. **Library**: 30 recipes after popular film stocks (Portra, Ektar, Gold, Kodachrome, Superia, Pro 400H, Velvia, CineStill, Tri-X, HP5…) and films (Blade Runner 2049, Skyfall, The Matrix, Fury Road, Drive, Amélie, In the Mood for Love, Dune…), each with what the look is, how the settings get there, and how to shoot it. **Lab**: the preview stays on screen while the settings, in five tabs (Film, Color, Light, Tone, Detail), change it; film simulations are a scrolling strip of thumbnails of your picture, each in its look (like a phone camera's filter row), and grain and the effects are one-tap chips; **Library** starts from any recipe; the sample is a color chart (the 24 color-checker patches, eight skin tones, a grey ramp) or one of your photos, and a **vectorscope** in the manner of DaVinci Resolve's shows where every color lands, with the **skin-tone line** to check skin against; save the result to My recipes. Any recipe can be loaded into a slot. |
 | **Equipment** | Total shots, shutter actuations against the rated shutter life, and all of the camera's usage counters: power-ons, operating, shooting and viewfinder time, viewfinder switches, flash, half-presses, OK and command-dial use, sensor cleanings, heat warnings and shutdowns, time spent with the sensor hot, battery, USB and lens counts. |
 | **Backups** | Back up the camera's settings file, restore it to the same model, share it, delete it, or **import** a backup file (one shared from this app, or the camera's own file). Each backup is a ticket-style card: camera, firmware and date as labelled fields, the recipes inside below a tear line. |
 | **Settings** | **Set the camera clock** (on by default, as XApp does). The camera's **Location sync** (see below), **location interval** and **Connect while power off** settings, written straight to the camera. **Log**: save, share, clear. |
@@ -65,7 +65,7 @@ What's possible, and how:
 | Read the slot names | yes, from the settings file (no backup is saved unless you ask) | yes |
 | Read every setting of a slot | in the settings file, but its layout isn't mapped yet | **yes**, one setting at a time |
 | Change one slot, or load a recipe into a chosen slot | only by editing the settings file and restoring it, which needs that layout and a test on the camera | **yes**, documented and reported working on an X100VI |
-| See a recipe on a picture | the Lab: an approximation on the phone, on a photo or a RAW, with no camera at all | the camera develops a RAW with the recipe, exactly (**Develop on camera**) |
+| See a recipe on a picture | the Lab (an approximation on the phone) | the camera develops a RAW with the recipe, exactly (**Develop on camera**) |
 
 > Fujifilm says that using any program it hasn't licensed to connect to or control a camera voids
 > the camera's limited warranty ([Fuji X Weekly, 2026-06-08](https://fujixweekly.com/2026/06/08/your-cameras-warranty-might-be-voided/)).
@@ -80,13 +80,25 @@ camera shot (import it with Photos, or from anywhere on the phone), connect the 
 follows the camera's picture. From then on **every change develops on the camera by itself** once
 the controls rest for a moment: the RAF is uploaded once, and each version takes about a second
 on an X100VI. Hold the picture to see it as shot (the JPEG inside the RAF); without the camera,
-the phone's approximation works on that same JPEG (see *RAW files without the camera*). **Save**
-keeps the camera's JPEG in Pictures/Fuji Remote.
+the phone's approximation works on that same JPEG. **Save** keeps the camera's JPEG in
+Pictures/Fuji Remote.
 
 This is X RAW Studio's method: upload the RAF, patch the conversion profile (`0xD185`) with the
 recipe, start a reduced-size conversion (`0xD183 = 0`) and fetch the JPEG. A conversion that
 doesn't finish within 40 seconds can leave the camera stuck until it's switched off and on (with
 the battery out if it won't switch off); the app never starts another on top of it.
+
+### The Lab's preview
+
+On the color chart or a photo from the phone, the Lab renders the recipe in a camera's order:
+white balance and the film simulation's color in linear light, then the tone curve (its shape on
+the perceptual scale, where the highlight and shadow settings live; black and white stay put, so
+soft tones and DR200/DR400 never grey the whites), saturation, and back in sRGB the split toning,
+the color chrome effects, clarity, sharpness and grain. D-range priority sets the tones itself, as
+on the camera. It's an approximation: the camera's own result will differ. If measured 3D LUTs of
+the film simulations are added (`app/src/main/assets/luts/<FILM_SIM>.cube`, e.g.
+`CLASSIC_CHROME.cube`, fitted to the camera's own renderings), the Lab uses them in place of its
+built-in approximation of that film simulation; none ship.
 
 ### Photos and remote over Wi-Fi
 
@@ -189,41 +201,6 @@ through, a row of ceiling lamps running a slow chase, and fine grain. It animate
 app is in front.
 
 ---
-
-### RAW files without the camera
-
-In the Lab, **Picture → A RAW file (RAF)** opens a RAF this camera shot and edits it on the phone,
-with no camera connected: every setting changes the preview as you go, the film-simulation strip
-shows the RAW in each look, and the vectorscope follows. It's an approximation, made on the phone;
-for the camera's exact result, tap **Camera** with the camera on USB (the same RAF, no need to pick
-it again). A RAW opened this way stays on the phone even with the camera plugged in, until you tap
-Camera.
-
-How it works:
-
-- **The picture** is the JPEG inside the RAF (where the RAF header says it is): the camera's own
-  rendering, demosaiced and lens-corrected, turned upright by its Exif orientation.
-- **How it was shot**: Fujifilm's maker note in that JPEG's Exif records the film simulation,
-  white balance (and shift), highlight and shadow, dynamic range and D-range priority, color, the
-  color chrome effects, grain, sharpness, noise reduction and clarity. The Lab says what it found
-  (**Use its settings** puts them in the controls; the preview then shows the RAW exactly as shot).
-- **Back to neutral**: the phone undoes that look (split toning, saturation, tone curve, color mix,
-  white balance, in that order) into unclipped linear light, so a recipe renders on the RAW as it
-  would on a neutral shot, not stacked on top of the look it was shot with. Sharpness, clarity,
-  noise reduction, grain and color chrome count from what the picture already has.
-- **The render** follows a camera's order: white balance and the film simulation's color in linear
-  light, the tone curve (its shape on the perceptual scale, where the highlight and shadow settings
-  live, black and white kept in place), saturation, then split toning, the color chrome effects,
-  clarity, sharpness and grain.
-- **Save → The picture, as the phone shows it** renders it again at up to 2048 pixels and saves a
-  JPEG (named `…-phone.jpg`) in Pictures/Fuji Remote.
-
-What it can't do: the camera's own processing works from the sensor data with tables that aren't
-in the app, so colors, contrast and tones will differ in detail; a monochrome shot's JPEG has no
-color left to recover; highlights the camera clipped stay clipped. If measured 3D LUTs of the film
-simulations are added later (`app/src/main/assets/luts/<FILM_SIM>.cube`, e.g. `CLASSIC_CHROME.cube`,
-fitted to the camera's own renderings), the Lab uses them in place of its built-in approximation of
-that film simulation; none ship.
 
 ## Using the app
 
@@ -358,17 +335,15 @@ app/src/main/java/com/fujiapp/remote/
 ├── model/                 CameraSnapshot (all raw values, decoded), CameraInfo, CameraVitals, BackupMeta,
 │                          SettingsFile (the backup file: header and C1–C7 names, pure, tested)
 ├── recipe/                Recipe (every slot setting), BankCodec (USB values and write order, tested),
-│                          RecipeLibrary (the 30 recipes), MyRecipes (saved from the Lab),
-│                          ShotSettings (a JPEG's Exif: orientation, the settings it was shot with; tested)
+│                          RecipeLibrary (the 30 recipes), MyRecipes (saved from the Lab)
 ├── usb/                   Ptp (containers, tested), UsbCamera (USB host PTP: slots, backup), RecipeTransfer
 ├── wifi/                  FujiWifi (Fujifilm PTP over TCP: init, OK, gallery, import, remote, live view),
 │                          WifiJoin (the camera's network, for this app only), WifiSession
-├── preview/               RecipePreview (the Lab's approximate rendering, in linear light, and taking a camera
-│                          JPEG back to neutral; tested), Lut3D and FilmLuts (measured film-simulation LUTs,
-│                          when there are any), SampleScene (the color chart), Vectorscope (skin-tone line)
+├── preview/               RecipePreview (the Lab's approximate rendering, in linear light; tested), Lut3D and
+│                          FilmLuts (measured film-simulation LUTs, when there are any), SampleScene (the
+│                          color chart), Vectorscope (with the skin-tone line)
 ├── data/BackupStore.kt    Backups in app storage (.dat as received + .json metadata)
-├── util/                  AppLog (recorder), LogExporter (Downloads), AppSettings, PhoneLocation,
-│                          PictureSaver (Pictures/Fuji Remote)
+├── util/                  AppLog (recorder), LogExporter (Downloads), AppSettings, PhoneLocation
 ├── CameraSession.kt       Scan → connect → pair → register → live status / features / transfers
 ├── App.kt                 Holds the session, starts the recorder, records crashes
 └── ui/                    Deco (design system), Kit (view builders), StageView (the hazy stage),
